@@ -1,6 +1,8 @@
-﻿# Monitor Formazione Apprendistato
+# FormaTrack — Gestionale Apprendisti
 
-Applicazione desktop sviluppata con **Electron + React** per monitorare il percorso formativo degli apprendisti del CERDD. I dati sono persistiti su **Supabase** (PostgreSQL cloud) e l'autenticazione avviene tramite credenziali gestite direttamente nella tabella `users`.
+Applicazione desktop sviluppata con **Electron + React** per la gestione operativa degli apprendisti: calendario, note, registro attività, prenotazioni future, valutazioni e statistiche. I dati sono persistiti su **Supabase** (PostgreSQL cloud) e l'autenticazione avviene tramite credenziali gestite direttamente nella tabella `users`.
+
+> **Nota storica**: fino alla v1.x l'app era un tracker del percorso formativo a obiettivi (piano formativo SEFRI, competenze, notifiche di completamento). Dalla v2.0 è stata trasformata in un gestionale apprendisti generico: obiettivi, notifiche, statistiche di progresso, ricerca ed export sono stati rimossi e sostituiti da calendario, note, attività, prenotazioni e un cruscotto dati.
 
 ---
 
@@ -8,10 +10,11 @@ Applicazione desktop sviluppata con **Electron + React** per monitorare il perco
 
 | Ruolo | Permessi |
 |---|---|
-| `student` | Aggiornamento progresso, commenti, impostazioni personali, cambio password |
-| `trainer` | Monitoraggio e validazione degli apprendisti assegnati, approvazione obiettivi |
-| `inspector` | Accesso in sola lettura agli apprendisti collegati |
-| `admin` | Gestione utenti completa, supervisione globale, reset password, assegnazioni bulk |
+| `student` (apprendista) | Gestisce il proprio calendario, note, attività e valutazioni; impostazioni personali, cambio password |
+| `trainer` (formatore) | Seleziona un apprendista assegnato e ne gestisce calendario/note/attività/prenotazioni/valutazioni; accesso a Dati e Gestione Utenti/Aree di lavoro |
+| `inspector` (ispettore) | Accesso in sola lettura agli apprendisti collegati, incluse le statistiche in Dati |
+| `admin` | Gestione utenti e aree di lavoro completa, supervisione di tutti gli apprendisti dell'area di lavoro |
+| `app_admin` | Come `admin` ma trasversale a tutte le aree di lavoro (multi-tenant) |
 
 ---
 
@@ -19,32 +22,21 @@ Applicazione desktop sviluppata con **Electron + React** per monitorare il perco
 
 - **Autenticazione Supabase** con password hashate bcrypt. Al primo accesso con password predefinita (`Abc123!`) viene forzato il cambio password prima di accedere alla dashboard.
 - **Restore sessione sicuro**: al refresh la sessione viene verificata direttamente sul DB per controllare il flag `must_change_password`.
-- **Dashboard** con riepilogo progresso, statistiche e grafici trend per studente.
-- **Piano formativo a 3 step** per ogni obiettivo: **Spiegato → Esercitato → Autonomo**. Completamento automatico se tutti e 3 i passi sono selezionati oppure se `Autonomo` è attivo.
-- **Sezione obiettivi**: commenti, allegati file, stato, dettagli avanzamento, toolbar con ricerca/filtri/ordinamento e azioni bulk.
-- **Ricerca avanzata** su obiettivi, commenti e notifiche con filtri per stato, campo, livello Bloom e anno.
-- **Sistema notifiche**: categorie, ricerca, filtro per tipo, badge non lette, segna tutte lette, elimina lette, approvazione trainer.
-- **Inbox** con gestione in blocco e interfaccia per ruolo.
-- **Export report**: PDF (tabelle formattate con colonne 3 step), Excel multi-sheet e CSV con statistiche complete.
-- **Gestione valutazioni materie**: il pulsante "Aggiungi Valutazione" sui moduli apre il form specifico per materia e voto.
-- **Impostazioni personalizzate**: lingua, tema chiaro/scuro, vista iniziale, modalità compatta, riduzione animazioni, memoria ultimo studente selezionato.
+- **Dashboard**: profilo dell'apprendista selezionato + grafico "Valutazioni per apprendista" (formatore/admin/ispettore).
+- **Calendario**: vista mensile con celle ampie; eventi creati manualmente (verde), attività già svolte (giallo) e prenotazioni future (arancione) sullo stesso calendario, senza duplicare i dati. Eventi e attività si possono creare, modificare ed eliminare direttamente dal pannello del giorno selezionato.
+- **Note**: elenco di annotazioni testuali libere per apprendista, con autore e data.
+- **Attività**: tabella delle attività svolte da un apprendista — data/orario apprendista, orario formatore, numero apprendisti coinvolti, tipo attività, descrizione, durata stimata, sede, ticket.
+- **Prenotazione**: il formatore pianifica in anticipo un'attività futura per l'apprendista (data obbligatoriamente futura, orario, durata stimata, tipo). Compare automaticamente sia nel registro Attività sia nel Calendario.
+- **Valutazioni**: ogni apprendista (o il formatore per l'apprendista selezionato) può registrare una valutazione con materia libera, voto (0–6) e una nota facoltativa.
+- **Dati**: statistiche aggregate su tutti gli apprendisti visibili (formatore/admin/ispettore) — sedi con più interventi, apprendisti con più attività, tipo di attività più frequente, andamento mensile, durata media attività.
+- **Gestione Utenti** (admin): organizzata in 4 tab — Utenti (ricerca/filtro/CRUD/promozione anno), Assegnazioni Bulk (assegna formatore a più apprendisti), Archivio (apprendisti archiviati, ripristinabili), Log Audit (storico azioni).
+- **Aree di lavoro** (multi-tenant, solo `app_admin`): creazione area di lavoro con relativo admin, selezione area di lavoro attiva.
+- **Impostazioni personalizzate**: lingua, tema chiaro/scuro, vista iniziale, modalità compatta, riduzione animazioni, memoria ultimo apprendista selezionato, controllo aggiornamenti app.
 - **Cambio password** con checklist requisiti in tempo reale (10–20 caratteri, maiuscole, minuscole, numero, simbolo speciale `! $ # _`).
-- **Accessibilità WCAG**: navigazione da tastiera, supporto screen reader, contrasto potenziato, riduzione motion.
-- **Performance**: debounce, throttle, memoization, cache con TTL, virtual scrolling.
+- **Accessibilità**: navigazione da tastiera, focus trap nel menu, annunci screen reader.
 - **Interfaccia multilingua**: Italiano, English, Deutsch, Français.
 - **Session timeout**: logout automatico dopo 5 minuti di inattività con dialog di avviso 30 s prima.
-- **Versioning automatico**: `npm run version:bump` aggiorna `package.json`, `src/appVersion.js` e questo README.
-
----
-
-## Gestione utenti (admin)
-
-- Creazione, modifica, eliminazione utenti.
-- Ricerca e filtro per ruolo.
-- Reset password → reimposta a `Abc123!` e setta `must_change_password = true` sul DB: al prossimo login l'utente sarà obbligato a cambiarla.
-- Promozione anno di formazione e assegnazioni bulk trainer/inspector.
-- **Badge ⚠️ arancione** accanto al nome: utente che usa ancora la password predefinita.
-- **Badge ⚠️ rosso** accanto al nome: apprendista con periodo di apprendistato scaduto (data fine < oggi) — da eliminare o aggiornare.
+- **Aggiornamenti automatici**: `electron-updater` scarica le nuove versioni dalle GitHub Release.
 
 ---
 
@@ -54,14 +46,11 @@ Applicazione desktop sviluppata con **Electron + React** per monitorare il perco
 |---|---|---|
 | React | 18 | UI renderer |
 | Electron | 40 | Desktop wrapper |
-| Material UI | 7 | Componenti UI |
-| Framer Motion | 12 | Animazioni |
+| Material UI | 7 | Componenti UI (switch, select, snackbar) |
+| Framer Motion | 12 | Animazioni di transizione tra sezioni |
 | Lucide React | 0.294 | Icone |
-| Recharts | 3 | Grafici trend |
-| jsPDF + AutoTable | 4 / 5 | Export PDF |
-| XLSX | 0.18 | Export Excel |
-| React Window | 2 | Virtualizzazione liste |
-| Supabase JS | 2 | Database cloud |
+| Recharts | 3 | Grafici a barre (sezione Dati, valutazioni per apprendista) |
+| Supabase JS | 2 | Database cloud + realtime |
 | bcryptjs | 3 | Hashing password |
 
 ---
@@ -79,8 +68,15 @@ Applicazione desktop sviluppata con **Electron + React** per monitorare il perco
 
 ```bash
 git clone <REPO_URL>
-cd progetto-avanzamento-formazione
+cd "FormaTrack APP"
 npm install
+```
+
+Crea un file `.env` nella root con:
+
+```
+REACT_APP_SUPABASE_URL=<url progetto Supabase>
+REACT_APP_SUPABASE_ANON_KEY=<anon key progetto Supabase>
 ```
 
 ---
@@ -105,16 +101,33 @@ npm run build
 
 Esegue in sequenza:
 1. build React (`react-scripts build`)
-2. copia `main.js` → `build/electron.js`
-3. packaging Electron con `electron-builder` (output in `dist/`)
+2. packaging Electron con `electron-builder` → output in `dist/`
+
+### Output
+
+Genera:
+- `FormaTrack-2.0.10.exe` — installer NSIS per Windows
+- `FormaTrack-2.0.10.exe.blockmap` — per aggiornamenti incrementali
+- `latest.yml` — metadata per auto-updater
+
+### Pubblicazione su GitHub Release
+
+1. Vai a [GitHub Releases](https://github.com/LoJaeggli09/formatrack/releases)
+2. Crea una nuova release con tag `v2.0.10`
+3. Carica questi file:
+   - `FormaTrack-2.0.10.exe`
+   - `latest.yml`
+   - `FormaTrack-2.0.10.exe.blockmap` (opzionale, per update più veloci)
+
+L'app usa `electron-updater` per scaricare automaticamente l'installer dal release più recente.
 
 ---
 
 ## Versioning
 
-Versione corrente: **`1.2.43`**
+Versione corrente: **`2.0.10`**
 
-Regola incremento:
+Regola incremento (script `version:bump`):
 - patch standard: `1.1.0 → 1.1.1`
 - rollover a 100: `1.1.99 → 1.2.0`
 
@@ -122,7 +135,9 @@ Regola incremento:
 npm run version:bump
 ```
 
-Aggiorna automaticamente `package.json`, `src/appVersion.js` e questo README.
+Aggiorna automaticamente `package.json` e `src/appVersion.js`. Lo script cerca anche di aggiornare una riga `## Ultime Migliorie (vX.X.X)` in questo README, se presente.
+
+> Per un salto di versione non incrementale (es. major bump come questo, `1.2.x → 2.0.10`), aggiornare manualmente `package.json` e `src/appVersion.js`.
 
 ---
 
@@ -133,9 +148,12 @@ Aggiorna automaticamente `package.json`, `src/appVersion.js` e questo README.
 ├── main.js                              # Electron main process
 ├── package.json
 ├── electron-builder.json
+├── supabase-workspaces-policies.sql             # Schema + RLS: workspaces
+├── supabase-calendar-notes-activities.sql       # Schema + RLS: calendar_events, notes, activities
+├── supabase-activities-extra-fields.sql         # ALTER: tipo/orario/durata/sede/ticket su activities
+├── supabase-activities-trainer-fields.sql       # ALTER: orario formatore + numero apprendisti su activities
 ├── public/
-│   ├── index.html
-│   └── uploads/                         # Allegati (Electron fs)
+│   └── index.html
 ├── src/
 │   ├── App.js                           # Root: gestione screen, sessione, inattività
 │   ├── App.css                          # Stili globali e variabili CSS
@@ -145,43 +163,37 @@ Aggiorna automaticamente `package.json`, `src/appVersion.js` e questo README.
 │   ├── theme.js                         # Tema MUI
 │   ├── components/
 │   │   ├── ForceChangePasswordModal.js  # Modal cambio password obbligatorio
-│   │   ├── SideMenu.js                  # Menu laterale e badge notifiche
-│   │   ├── ProfileSection.js            # Profilo utente
-│   │   ├── ProgressSection.js           # Progresso generale
-│   │   ├── ObjectivesSection.js         # Obiettivi di formazione
-│   │   ├── ObjectivesToolbar.js         # Toolbar ricerca/filtri obiettivi
-│   │   ├── SearchSection.js             # Ricerca full-text
-│   │   ├── InboxSection.js              # Notifiche e messaggi
-│   │   ├── ExportSection.js             # Export PDF/Excel/CSV
-│   │   ├── ManageSection.js             # Gestione utenti (admin)
-│   │   ├── GradingSection.js            # Valutazioni materie
-│   │   ├── GradingDetailModal.js        # Dettaglio valutazione
-│   │   ├── DashboardCustomizeSection.js # Personalizzazione dashboard
+│   │   ├── SideMenu.js                  # Menu laterale
+│   │   ├── ProfileSection.js            # Profilo apprendista (vista Dashboard)
+│   │   ├── CalendarSection.js           # Calendario mensile (eventi + attività + prenotazioni)
+│   │   ├── NotesSection.js              # Note per apprendista
+│   │   ├── ActivitiesSection.js         # Tabella attività svolte
+│   │   ├── BookingSection.js            # Prenotazione attività future
+│   │   ├── GradingSection.js            # Valutazioni (materia libera + voto + nota)
+│   │   ├── DataSection.js               # Statistiche aggregate sulle attività
+│   │   ├── GradesByUserChart.js         # Grafico valutazioni per apprendista (Dashboard)
+│   │   ├── RankedBarChart.js            # Grafico a barre riutilizzabile (Recharts)
+│   │   ├── ManageSection.js             # Gestione utenti/aree di lavoro (a tab)
 │   │   ├── SettingsSection.js           # Impostazioni + cambio password
-│   │   ├── ProgressTrendChart.js        # Grafici trend (Recharts)
+│   │   ├── ErrorBoundary.js             # Boundary errori React
+│   │   ├── SkeletonLoader.js            # Placeholder di caricamento
 │   │   └── ThemeProvider.js             # Context tema chiaro/scuro
 │   ├── screens/
-│   │   ├── LoginScreen.js               # Autenticazione
-│   │   ├── DashboardScreen.js           # Orchestratore principale
-│   │   ├── HomeScreen.js                # Schermata home
-│   │   └── CourseDetailScreen.js        # Dettaglio corso
+│   │   ├── LoginScreen.js               # Autenticazione + creazione area di lavoro
+│   │   └── DashboardScreen.js           # Orchestratore principale (routing interno)
 │   ├── data/
 │   │   ├── users.supabase.js            # CRUD utenti, auth bcrypt, flag password
-│   │   ├── progress.supabase.js         # Progressi su Supabase
-│   │   ├── progress_history.supabase.js # Snapshot storici su Supabase
-│   │   ├── grades.supabase.js           # Valutazioni su Supabase
-│   │   ├── notifications.supabase.js    # Notifiche su Supabase
-│   │   ├── dashboardPreferences.supabase.js
-│   │   ├── trainingPlan.js              # Piano formativo (statico)
-│   │   ├── exportReports.js             # Generazione PDF/Excel/CSV
-│   │   ├── files.js                     # Allegati (Electron fs + fallback)
-│   │   └── translations.js              # Stringhe extra i18n
+│   │   ├── workspaces.supabase.js       # CRUD aree di lavoro
+│   │   ├── calendar.supabase.js         # CRUD eventi calendario
+│   │   ├── notes.supabase.js            # CRUD note
+│   │   ├── activities.supabase.js       # CRUD attività/prenotazioni + query aggregate multi-apprendista
+│   │   ├── grades.supabase.js           # CRUD valutazioni + query aggregate multi-apprendista
+│   │   └── auditLog.supabase.js         # Scrittura/lettura log audit
 │   ├── hooks/
-│   │   ├── accessibility.js             # Tastiera, screen reader, font resize
+│   │   ├── accessibility.js             # Tastiera, screen reader
 │   │   └── inactivityTimeout.js         # Logout automatico per inattività
 │   └── utils/
-├── migrazione_dati/                     # CSV per caricamento iniziale dati
-├── migrazione_database/                 # CSV storici precedente versione
+│       └── logger.js                    # Logging centralizzato (console + IPC + toast)
 ├── scripts/
 │   └── bump-version.js
 └── build/                               # Output build (generato, non committare)
@@ -189,29 +201,48 @@ Aggiorna automaticamente `package.json`, `src/appVersion.js` e questo README.
 
 ---
 
-## Database Supabase — Schema tabella `users`
+## Database Supabase
+
+Lo schema base (`users`, `grades`, `audit_log`) proviene dalla versione originale dell'app. Le tabelle introdotte con il gestionale v2.0 sono negli script SQL in root — eseguirli in ordine nell'SQL Editor di Supabase su un progetto nuovo o non ancora aggiornato:
+
+1. `supabase-workspaces-policies.sql` — tabella `workspaces`
+2. `supabase-calendar-notes-activities.sql` — tabelle `calendar_events`, `notes`, `activities`
+3. `supabase-activities-extra-fields.sql` — colonne `activity_type`, `start_time`, `duration_minutes`, `site`, `ticket` su `activities`
+4. `supabase-activities-trainer-fields.sql` — colonne `trainer_time`, `apprentice_count` su `activities`
+
+### Schema tabella `users`
 
 | Colonna | Tipo | Note |
 |---|---|---|
 | `id` | `int8` PK | Auto-increment |
-| `nome` | `text` | |
-| `cognome` | `text` | |
+| `nome` / `cognome` | `text` | |
 | `email` | `text` | |
-| `ruolo` | `text` | `student` / `trainer` / `inspector` / `admin` |
+| `ruolo` | `text` | `student` / `trainer` / `inspector` / `admin` / `app_admin` |
 | `password_hash` | `text` | Hash bcrypt |
 | `must_change_password` | `boolean` | `true` = forzato cambio al prossimo login |
-| `trainer_id` | `int8` FK | Formatore assegnato (solo studenti) |
-| `inspector_id` | `int8` FK | Ispettore assegnato (solo studenti) |
+| `trainer_id` / `inspector_id` | `int8` FK | Assegnazioni (solo apprendisti) |
+| `workspace_id` | `int8` FK | Area di lavoro di appartenenza |
 | `numero_studente` | `text` | |
 | `anno_formazione` | `int4` | |
-| `data_inizio_apprendistato` | `date` | |
-| `data_fine_apprendistato` | `date` | |
+| `data_inizio_apprendistato` / `data_fine_apprendistato` | `date` | |
+| `archiviato` | `boolean` | Apprendista archiviato |
 | `stato` | `text` | |
 
-> **Importante**: se si ricrea il DB, aggiungere la colonna:
-> ```sql
-> ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT false;
-> ```
+### Tabella `activities` (registro attività + prenotazioni)
+
+| Colonna | Tipo | Note |
+|---|---|---|
+| `student_id` | `int8` FK | Apprendista |
+| `activity_date` | `date` | Data attività — se futura, l'attività è trattata come "prenotazione" nel Calendario |
+| `description` | `text` | Descrizione libera |
+| `activity_type` | `text` | Tipo attività (testo libero) |
+| `start_time` | `time` | Orario apprendista |
+| `trainer_time` | `time` | Orario formatore (stesso giorno) |
+| `apprentice_count` | `int4` | Numero apprendisti coinvolti insieme |
+| `duration_minutes` | `int4` | Durata stimata/effettiva |
+| `site` | `text` | Sede |
+| `ticket` | `text` | Riferimento ticket |
+| `created_by` | `int8` FK | Chi ha creato la riga |
 
 ---
 
@@ -226,8 +257,8 @@ Aggiorna automaticamente `package.json`, `src/appVersion.js` e questo README.
 
 Non usa React Router. La vista è gestita con stato:
 
-- `currentScreen`: `login` / `forceChangePassword` / `dashboard`
-- `currentView` (in dashboard): `dashboard`, `objectives`, `search`, `statistics`, `export`, `inbox`, `manage`, `settings`
+- `currentScreen` (in `App.js`): `login` / `forceChangePassword` / `dashboard`
+- `currentView` (in `DashboardScreen.js`): `dashboard`, `calendar`, `notes`, `activities`, `booking`, `grading`, `data` (formatore/admin/ispettore), `manage` (admin), `settings`
 
 ### Flusso login
 
@@ -253,40 +284,11 @@ App.js useEffect
       → errore DB? → fallback dati cache localStorage
 ```
 
-### Cambio password obbligatorio
+### Selezione apprendista
 
-1. Admin crea utente → `must_change_password = true`, password = `Abc123!` hashata.
-2. Admin fa reset password → stessa cosa.
-3. Al login, se flag attivo **oppure** password inserita è `Abc123!` → modal bloccante.
-4. Modal: checklist requisiti in tempo reale, nessuna possibilità di chiudere senza completare.
-5. `updateUserPassword` → salva hash bcrypt + setta `must_change_password = false`.
-
----
-
-## Flussi principali runtime
-
-### Aggiornamento obiettivi
-
-- 3 step per obiettivo: `spiegato`, `esercitato`, `autonomo`.
-- Completato se `autonomo = true` **oppure** tutti e 3 i step sono `true`.
-- Salvato su Supabase via `progress.supabase.js`.
-
-### Notifiche
-
-- Alla transizione a completato di un obiettivo studente → notifica per il trainer.
-- Salvate su Supabase via `notifications.supabase.js`.
-- `SideMenu` mostra badge con contatore non lette.
-
-### Assegnazioni apprendista
-
-- Ogni studente ha `trainerId` e `inspectorId`.
-- Il trainer vede solo i propri apprendisti.
-- L'ispettore vede solo gli apprendisti con il proprio `inspectorId`.
-
-### Trend storico
-
-- Ogni aggiornamento progresso genera snapshot via `progress_history.supabase.js`.
-- Il grafico usa questi snapshot per andamento temporale e stima fine percorso.
+- `trainer` / `admin` / `inspector` selezionano un apprendista da una lista (student-selector) prima di operare su calendario/note/attività/prenotazione/valutazioni.
+- `student` opera sempre sui propri dati, senza selettore.
+- La sezione **Dati** e il grafico valutazioni in Dashboard aggregano invece **tutti** gli apprendisti visibili al ruolo corrente, non solo quello selezionato.
 
 ---
 
@@ -302,6 +304,7 @@ Per hardening produzione:
 - `preload` script con API esposte esplicitamente
 - Variabili Supabase URL/Key in variabili d'ambiente (`.env`), non nel sorgente
 - Rimuovere `webSecurity: false`
+- Le policy RLS delle nuove tabelle (`calendar_events`, `notes`, `activities`, `workspaces`) sono permissive (`using (true)`) per compatibilità con l'autenticazione custom — da restringere se si integra Supabase Auth
 
 ---
 
@@ -310,24 +313,7 @@ Per hardening produzione:
 - CSS in `src/App.css` con variabili CSS (`:root`) per colori e superfici.
 - `ThemeProvider` sincronizza classe body (`dark-mode`) e tema MUI (`src/theme.js`).
 - Supporto tema chiaro/scuro con persistenza in `localStorage`.
-
----
-
-## Export e reporting
-
-| Formato | Libreria | Contenuto |
-|---|---|---|
-| PDF | jsPDF + AutoTable | Tabelle formattate con colonne 3 step |
-| Excel | XLSX | Multi-sheet con statistiche complete |
-| CSV | nativo | Export tabellare |
-
----
-
-## Allegati
-
-- Salvataggio tramite `saveCommentFile` (`src/data/files.js`).
-- In Electron: scrive in `public/uploads` via `fs`.
-- In browser: Data URL in memoria (fallback).
+- Calendario: verde = appuntamenti, giallo = attività svolte, arancione = prenotazioni future (stessa legenda visibile nella UI).
 
 ---
 
@@ -337,17 +323,18 @@ Per hardening produzione:
 
 | Tipo | Dove |
 |---|---|
-| Regola business obiettivi | `src/screens/DashboardScreen.js` + `src/data/progress.supabase.js` |
+| Nuovo campo su un'attività | `src/data/activities.supabase.js` (normalize + CRUD) + `ActivitiesSection.js` / `BookingSection.js` / `CalendarSection.js` (UI) + script SQL `ALTER TABLE` |
 | Nuova sezione dashboard | Componente in `src/components/` + voce in `SideMenu.js` + switch in `DashboardScreen.js` |
 | Nuove traduzioni | `src/i18n.js` (tutte e 4 le lingue) |
-| Nuova colonna DB | Aggiornare `normalizeUser` e `denormalizeUser` in `users.supabase.js` |
-| Nuovo export | `src/data/exportReports.js` |
+| Nuova colonna tabella `users` | Aggiornare `normalizeUser` e `denormalizeUser` in `users.supabase.js` |
+| Nuovo grafico statistiche | `RankedBarChart.js` (riutilizzabile) da `DataSection.js` o `GradesByUserChart.js` |
 
 ### Convenzioni
 
-- Codice sempre role-aware (`student` / `trainer` / `inspector` / `admin`).
+- Codice sempre role-aware (`student` / `trainer` / `inspector` / `admin` / `app_admin`).
 - Logica business centralizzata in `src/data/`, non nei componenti.
 - Ogni nuova chiave i18n va aggiunta in **tutte e 4 le lingue** (it, en, de, fr).
+- Prenotazioni e attività condividono la stessa tabella `activities`: una riga è una "prenotazione" solo se `activity_date` è nel futuro (calcolato lato client, nessun flag dedicato).
 - Aggiornare questo README quando cambia: flusso login, schema DB, struttura file.
 
 ---
@@ -358,24 +345,18 @@ Per hardening produzione:
 |---|---|
 | Schermata bianca in Electron | Verificare che React dev server sia attivo su porta `3003` |
 | Build non parte | Controllare dipendenze e `npm run react-build` |
+| "Could not find column ... in the schema cache" salvando un'attività | Eseguire gli script SQL in `supabase-activities-*.sql` mancanti, poi Supabase → Settings → API → Reload schema |
 | Dati incoerenti dopo test | Pulire `localStorage` del profilo test |
 | Traduzioni mancanti | Aggiungere chiave in `i18n.js` per tutte le lingue |
 | Modal cambio password loop | Verificare che `updateUserPassword` aggiorni `must_change_password = false` su Supabase |
-| Badge warning non appare | Verificare che la colonna `must_change_password` esista nella tabella `users` |
+| Badge warning non appare in Gestione Utenti | Verificare che la colonna `must_change_password` esista nella tabella `users` |
 
 ---
 
-## Roadmap — cosa manca
+## Prossimi passi consigliati
 
-### Alta priorità
-- [x] **Variabili d'ambiente**: spostare URL e chiave Supabase in `.env` (ora sono hardcoded in `supabaseClient.js`)
-- [x] **Hardening Electron**: `contextIsolation: true`, `nodeIntegration: false`, `preload` script
-- [x] **Audit log**: tabella Supabase dedicata per tracciare reset password, creazione/eliminazione utenti, accessi
-
-### Media priorità
-- [ ] **Test automatici**: login, obiettivi, notifiche, export (Jest + React Testing Library)
-- [x] **Gestione allegati su Supabase Storage**: attualmente i file sono locali (Electron fs)
-
-### Bassa priorità
-- [x] **Notifiche push desktop**: via Electron `Notification` API + Supabase Realtime — il trainer riceve notifica push quando uno studente completa un obiettivo; lo studente riceve conferma push locale al completamento
-- [x] **Archivio apprendisti**: sezione separata per apprendisti con apprendistato scaduto invece di eliminarli
+- [ ] Inizializzare un repository git (attualmente il progetto non è versionato) prima di ulteriori modifiche importanti
+- [ ] Rimuovere da `package.json` le dipendenze non più usate (`jspdf`, `jspdf-autotable`, `xlsx`, `react-window`) — erano legate a export/liste virtualizzate ora rimossi
+- [ ] Attività "precise": trasformare `activity_type` da testo libero a categorie predefinite per apprendistato, se richiesto
+- [ ] Hardening Electron (`contextIsolation: true`, `nodeIntegration: false`, `preload`) prima di un deploy pubblico
+- [ ] Restringere le policy RLS delle nuove tabelle oltre al semplice `using (true)`
