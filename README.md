@@ -37,7 +37,7 @@ Applicazione desktop sviluppata con **Electron + React** per la gestione operati
 - **Promemoria**: campanella in alto a destra, accanto al logo (con il numero dei promemoria aperti), contatore in rosso sulle voci di menu che hanno qualcosa in sospeso e notifiche di sistema per prenotazioni di oggi/domani, attività da validare o respinte, apprendisti fermi da oltre 10 giorni, valutazioni mancanti, note non lette e assenze senza giustificativo. Per l'`app_admin` c'è anche il promemoria "Aree di lavoro eliminabili", che compare quando un'area è archiviata da almeno 30 giorni: serve solo ad avvisare e porta all'archivio, **non elimina nulla** (l'eliminazione si fa dall'archivio, con conferma). Disattivabili dalle impostazioni.
 - **Gestione Utenti** (admin): organizzata in 4 tab — Utenti (ricerca/filtro/CRUD/promozione anno), Assegnazioni Bulk (assegna formatore a più apprendisti), Archivio (apprendisti archiviati, ripristinabili), Log Audit (storico azioni).
 - **Aree di lavoro** (multi-tenant, solo `app_admin`): creazione area di lavoro con relativo admin, selezione area di lavoro attiva.
-- **Archivio delle aree di lavoro** (solo `app_admin`): un'area si può archiviare (pulsante *Archivia* sulla sua scheda) e ripristinare. **Un'area archiviata continua a funzionare normalmente** — accessi, utenti e dati non cambiano —, esce solo dall'elenco attivo e finisce nell'*Archivio aree di lavoro*, dove si vede da quando è archiviata e da quando si può eliminare. L'eliminazione definitiva è possibile **solo dopo 30 giorni in archivio** (`ARCHIVE_RETENTION_DAYS` in `utils/workspaceArchive.js`), solo da quella pagina e solo dopo una conferma scritta (si digita il nome dell'area): elimina l'area, i suoi utenti e tutti i loro dati, file allegati compresi. Ripristinare un'area azzera il conteggio dei 30 giorni. Il limite è applicato anche dal database (vedi `supabase-workspaces-archive.sql`), non solo dall'interfaccia.
+- **Archivio delle aree di lavoro** (solo `app_admin`): un'area si può archiviare (pulsante *Archivia* sulla sua scheda) e ripristinare. **Un'area archiviata continua a funzionare normalmente** — accessi, utenti e dati non cambiano —, esce solo dall'elenco attivo e finisce nell'*Archivio aree di lavoro*, dove si vede da quando è archiviata e da quando si può eliminare. L'eliminazione definitiva è possibile **solo dopo 30 giorni in archivio** (`ARCHIVE_RETENTION_DAYS` in `utils/workspaceArchive.js`), solo da quella pagina e solo dopo una conferma scritta (si digita il nome dell'area): elimina l'area, i suoi utenti e tutti i loro dati, file allegati compresi. Ripristinare un'area azzera il conteggio dei 30 giorni. Il limite è applicato anche dal database, non solo dall'interfaccia.
 - **Impostazioni** organizzate in quattro gruppi di righe (titolo e spiegazione a sinistra, controllo a destra): *Interfaccia* (lingua, layout compatto, riduci animazioni), *Avvio e navigazione* (vista iniziale, ricorda l'ultimo apprendista, apprendista selezionato), *Promemoria e sicurezza* (promemoria, disconnessione automatica, cambio password) e *Applicazione* (versione, aggiornamenti, supporto).
 - **Cambio password** con checklist requisiti in tempo reale (10–20 caratteri, maiuscole, minuscole, numero, simbolo speciale `! $ # _`).
 - **Accessibilità**: navigazione da tastiera, focus trap nel menu, annunci screen reader.
@@ -156,16 +156,6 @@ Aggiorna automaticamente `package.json` e `src/appVersion.js`. Lo script cerca a
 ├── main.js                              # Electron main process
 ├── package.json
 ├── electron-builder.json
-├── supabase-workspaces-policies.sql             # Schema + RLS: workspaces
-├── supabase-calendar-notes-activities.sql       # Schema + RLS: calendar_events, notes, activities
-├── supabase-activities-extra-fields.sql         # ALTER: tipo/orario/durata/sede/ticket su activities
-├── supabase-activities-trainer-fields.sql       # ALTER: orario formatore + numero apprendisti su activities
-├── supabase-activities-validation.sql           # ALTER: stato/validazione su activities (v2.1)
-├── supabase-notes-structured.sql                # ALTER: categoria/visibilità/letto su notes (v2.1)
-├── supabase-calendar-recurrence.sql             # ALTER: ricorrenze su calendar_events (v2.1)
-├── supabase-absences.sql                        # Tabella absences + RLS (v2.1)
-├── supabase-attachments.sql                     # Tabella attachments + bucket Storage (v2.1)
-├── supabase-workspaces-archive.sql              # Archivio aree di lavoro: archived_at, blocco eliminazione prima di 30 giorni (v2.1)
 ├── public/
 │   └── index.html
 ├── src/
@@ -241,20 +231,9 @@ Aggiorna automaticamente `package.json` e `src/appVersion.js`. Lo script cerca a
 
 ## Database Supabase
 
-Lo schema base (`users`, `grades`, `audit_log`) proviene dalla versione originale dell'app. Le tabelle introdotte con il gestionale v2.0 sono negli script SQL in root — eseguirli in ordine nell'SQL Editor di Supabase su un progetto nuovo o non ancora aggiornato:
+Lo schema base (`users`, `grades`, `audit_log`) proviene dalla versione originale dell'app; le tabelle e colonne aggiunte dalla v2.0 in poi sono descritte qui sotto. Gli script SQL usati per creare e aggiornare lo schema non fanno parte del repository: vanno eseguiti direttamente nell'SQL Editor di Supabase.
 
-1. `supabase-workspaces-policies.sql` — tabella `workspaces`
-2. `supabase-calendar-notes-activities.sql` — tabelle `calendar_events`, `notes`, `activities`
-3. `supabase-activities-extra-fields.sql` — colonne `activity_type`, `start_time`, `duration_minutes`, `site`, `ticket` su `activities`
-4. `supabase-activities-trainer-fields.sql` — colonne `trainer_time`, `apprentice_count` su `activities`
-5. `supabase-activities-validation.sql` — colonne `status`, `submitted_at`, `validated_by`, `validated_by_name`, `validated_at`, `rejection_reason` su `activities`
-6. `supabase-notes-structured.sql` — colonne `category`, `visibility`, `read_at`, `read_by` su `notes`
-7. `supabase-calendar-recurrence.sql` — colonne `recurrence`, `recurrence_end` su `calendar_events`
-8. `supabase-absences.sql` — tabella `absences`
-9. `supabase-attachments.sql` — tabella `attachments` + bucket privato `attachments` su Supabase Storage
-10. `supabase-workspaces-archive.sql` — colonna `archived_at` su `workspaces`, trigger che impedisce di eliminare un'area archiviata da meno di 30 giorni e funzione `delete_archived_workspace` (eliminazione atomica di area, utenti e dati)
-
-> Gli script 5–10 sono opzionali finché non servono: `src/data/schemaFallback.js` riconosce colonne e tabelle mancanti e fa degradare l'app alle funzioni della v2.0 (niente validazione, niente categorie note, niente ricorrenze, sezioni Assenze e Allegati vuote, nessun archivio aree di lavoro: archiviare ed eliminare rispondono con un messaggio che chiede di eseguire lo script) invece di rompersi. Dopo ogni script: Supabase → Settings → API → **Reload schema**.
+> Le funzioni della v2.1 (validazione attività, categorie note, ricorrenze, Assenze, Allegati, archivio aree di lavoro) richiedono le relative colonne e tabelle. Finché mancano, `src/data/schemaFallback.js` le riconosce e fa degradare l'app alle funzioni della v2.0 invece di rompersi. Dopo ogni modifica allo schema: Supabase → Settings → API → **Reload schema**.
 
 ### Tabella `workspaces`
 
@@ -418,7 +397,7 @@ solo per lo stato. Font: Manrope (titoli, numeri, etichette, pulsanti) e Source 
 
 | Tipo | Dove |
 |---|---|
-| Nuovo campo su un'attività | `src/data/activities.supabase.js` (normalize + CRUD) + `ActivitiesSection.js` / `BookingSection.js` / `CalendarSection.js` (UI) + script SQL `ALTER TABLE` |
+| Nuovo campo su un'attività | `src/data/activities.supabase.js` (normalize + CRUD) + `ActivitiesSection.js` / `BookingSection.js` / `CalendarSection.js` (UI) + `ALTER TABLE` sul database Supabase |
 | Nuova sezione dashboard | Componente in `src/components/` + voce in `SideMenu.js` + switch in `DashboardScreen.js` |
 | Nuove traduzioni | `src/i18n.js` (tutte e 4 le lingue) |
 | Nuova colonna tabella `users` | Aggiornare `normalizeUser` e `denormalizeUser` in `users.supabase.js` |
@@ -446,11 +425,11 @@ solo per lo stato. Font: Manrope (titoli, numeri, etichette, pulsanti) e Source 
 |---|---|
 | Schermata bianca in Electron | Verificare che React dev server sia attivo su porta `3003` |
 | Build non parte | Controllare dipendenze e `npm run react-build` |
-| "Could not find column ... in the schema cache" salvando un'attività | Eseguire gli script SQL in `supabase-activities-*.sql` mancanti, poi Supabase → Settings → API → Reload schema |
-| Archiviare o eliminare un'area di lavoro mostra "Esegui lo script supabase-workspaces-archive.sql" | Eseguire `supabase-workspaces-archive.sql` (poi **Reload schema**) |
-| Le sezioni Assenze/Allegati restano vuote | Eseguire `supabase-absences.sql` e `supabase-attachments.sql`; finché mancano, l'app le mostra vuote senza errori (vedi `schemaFallback.js`) |
-| I pulsanti Valida/Respingi non fanno nulla | Manca `supabase-activities-validation.sql`: l'app avvisa con "Esegui lo script..." |
-| Categoria/visibilità delle note non si salvano | Manca `supabase-notes-structured.sql`: la nota viene salvata lo stesso, ma senza quei campi |
+| "Could not find column ... in the schema cache" salvando un'attività | Aggiungere la colonna mancante su `activities` (vedi schema sotto *Database Supabase*), poi Supabase → Settings → API → Reload schema |
+| Archiviare o eliminare un'area di lavoro mostra "Esegui lo script..." | Manca la colonna `archived_at` su `workspaces` (con trigger e funzione `delete_archived_workspace`); aggiungerla, poi **Reload schema** |
+| Le sezioni Assenze/Allegati restano vuote | Mancano le tabelle `absences` / `attachments` (e il bucket Storage `attachments`); finché mancano, l'app le mostra vuote senza errori (vedi `schemaFallback.js`) |
+| I pulsanti Valida/Respingi non fanno nulla | Mancano le colonne di validazione su `activities`: l'app avvisa con "Esegui lo script..." |
+| Categoria/visibilità delle note non si salvano | Mancano le colonne `category`/`visibility`/`read_at`/`read_by` su `notes`: la nota viene salvata lo stesso, ma senza quei campi |
 | Le notifiche di sistema non compaiono | Le notifiche native esistono solo nella build Electron e vanno abilitate per l'app in Windows; il pannello promemoria funziona comunque |
 | Dati incoerenti dopo test | Pulire `localStorage` del profilo test |
 | Traduzioni mancanti | Aggiungere chiave in `i18n.js` per tutte le lingue |
