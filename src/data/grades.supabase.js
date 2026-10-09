@@ -1,4 +1,5 @@
 import { supabase } from '../supabaseClient';
+import { readThroughCache } from './offlineCache';
 
 // Normalizza un voto dal formato Supabase al formato app
 const normalizeGrade = (g) => ({
@@ -20,13 +21,25 @@ export const getAllGrades = async () => {
 };
 
 // Leggi i voti di uno studente
-export const loadGrades = async (studentId) => {
-  const { data, error } = await supabase.from('grades').select('*').eq('utente_id', studentId);
-  if (error) throw error;
-  return data.map(normalizeGrade);
+export const loadGrades = async (studentId) =>
+  readThroughCache(`grades:${studentId}`, async () => {
+    const { data, error } = await supabase.from('grades').select('*').eq('utente_id', studentId);
+    if (error) throw error;
+    return data.map(normalizeGrade);
+  });
+
+// Leggi i voti di più studenti insieme (per statistiche aggregate)
+export const getGradesForStudents = async (studentIds) => {
+  if (!studentIds || studentIds.length === 0) return [];
+  const cacheKey = `grades:many:${[...studentIds].sort().join(',')}`;
+  return readThroughCache(cacheKey, async () => {
+    const { data, error } = await supabase.from('grades').select('*').in('utente_id', studentIds);
+    if (error) throw error;
+    return data.map(normalizeGrade);
+  });
 };
 
-// Aggiungi un voto (usato da CourseDetailScreen)
+// Aggiungi un voto
 export const saveGrade = async (studentId, gradeData) => {
   const { data, error } = await supabase.from('grades').insert([{
     id: Date.now().toString(),

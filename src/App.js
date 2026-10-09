@@ -4,8 +4,15 @@ import LoginScreen from './screens/LoginScreen';
 import DashboardScreen from './screens/DashboardScreen';
 import ThemeProvider from './components/ThemeProvider';
 import ForceChangePasswordModal from './components/ForceChangePasswordModal';
+import ErrorBoundary from './components/ErrorBoundary';
+import Snackbar from '@mui/material/Snackbar';
+import Alert from '@mui/material/Alert';
 import { getUserById } from './data/users.supabase';
+import { writeAuditLog, AUDIT_EVENTS } from './data/auditLog.supabase';
+import { clearOfflineCache } from './data/offlineCache';
+import { saveSession, loadSession, clearSession } from './utils/session';
 import { useInactivityTimeout } from './hooks/inactivityTimeout';
+import { logError } from './utils/logger';
 
 function App() {
   const [currentScreen, setCurrentScreen] = useState('login');
@@ -13,46 +20,70 @@ function App() {
   const [currentUser, setCurrentUser] = useState(null);
   const [language, setLanguage] = useState('it');
 
-  // Ripristina sessione al refresh — verifica il flag mustChangePassword dal DB
+  const [toast, setToast] = useState({ open: false, message: '', severity: 'error' });
+
   useEffect(() => {
-    const saved = localStorage.getItem('currentUser');
-    if (saved) {
-      try {
-        const cached = JSON.parse(saved);
-        getUserById(cached.id)
-          .then((freshUser) => {
-            if (!freshUser) {
-              localStorage.removeItem('currentUser');
-              return;
-            }
-            if (freshUser.mustChangePassword) {
-              setCurrentUser(freshUser);
-              setCurrentScreen('forceChangePassword');
-            } else {
-              setCurrentUser(freshUser);
-              setIsLoggedIn(true);
-              setCurrentScreen('dashboard');
-            }
-          })
-          .catch(() => {
-            // Fallback: usa i dati in cache se il DB non è raggiungibile
-            setCurrentUser(cached);
-            setIsLoggedIn(true);
-            setCurrentScreen('dashboard');
-          });
-      } catch (e) {
-        localStorage.removeItem('currentUser');
-      }
-    }
+    const handleAppToast = (e) => {
+      setToast({ open: true, message: e.detail.message, severity: e.detail.severity || 'error' });
+    };
+    window.addEventListener('app-toast', handleAppToast);
+    return () => window.removeEventListener('app-toast', handleAppToast);
   }, []);
 
-  // Monitoraggio inattività - logout dopo 5 minuti
+  const handleToastClose = (_, reason) => {
+    if (reason === 'clickaway') return;
+    setToast((prev) => ({ ...prev, open: false }));
+  };
+
+  // Ripristina la sessione all'avvio.
+  // Dal localStorage arriva solo l'id: ruolo, permessi e flag mustChangePassword
+  // vengono sempre riletti dal database, mai ripresi da quanto salvato in locale.
+  useEffect(() => {
+    // Pulizia della vecchia sessione in chiaro delle versioni <= 2.0.10
+    localStorage.removeItem('currentUser');
+
+    let cancelled = false;
+
+    const restore = async () => {
+      const session = await loadSession();
+      if (!session || cancelled) return;
+
+      try {
+        const freshUser = await getUserById(session.userId);
+        if (cancelled) return;
+        if (!freshUser) {
+          clearSession();
+          return;
+        }
+        setCurrentUser(freshUser);
+        if (freshUser.mustChangePassword) {
+          setCurrentScreen('forceChangePassword');
+        } else {
+          setIsLoggedIn(true);
+          setCurrentScreen('dashboard');
+        }
+      } catch (error) {
+        // Né rete né copia locale: si torna al login invece di fidarsi di dati
+        // di sessione non verificabili.
+        logError('App', 'Ripristino sessione fallito', error);
+        clearSession();
+      }
+    };
+
+    restore();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Monitoraggio inattività — durata configurabile dall'utente in Impostazioni
+  // (propagata da DashboardScreen, che ne è la fonte di verità in localStorage).
+  const [inactivityMinutes, setInactivityMinutes] = useState(5);
+
   const handleInactivityTimeout = () => {
     handleLogout();
   };
 
   const { showWarning, dismissWarning } = useInactivityTimeout(
-    5, // 5 minuti
+    inactivityMinutes,
     handleInactivityTimeout,
     isLoggedIn // Monitora solo quando loggato
   );
@@ -66,7 +97,7 @@ function App() {
     }
   }, [currentUser]);
 
-  const handleLogin = (user) => {
+  const handleLogin = async (user) => {
     if (user.mustChangePassword) {
       // Salva l'utente in modo che il modal possa usare user.id,
       // ma NON salvare la sessione e NON andare alla dashboard finché non cambia la password
@@ -77,22 +108,33 @@ function App() {
     setCurrentUser(user);
     setIsLoggedIn(true);
     setCurrentScreen('dashboard');
-    localStorage.setItem('currentUser', JSON.stringify(user));
+    await saveSession(user);
   };
 
-  const handlePasswordChanged = () => {
+  const handlePasswordChanged = async () => {
     const userWithoutFlag = { ...currentUser, mustChangePassword: false };
     setCurrentUser(userWithoutFlag);
     setIsLoggedIn(true);
     setCurrentScreen('dashboard');
-    localStorage.setItem('currentUser', JSON.stringify(userWithoutFlag));
+    await saveSession(userWithoutFlag);
   };
 
   const handleLogout = () => {
+    if (currentUser) {
+      writeAuditLog({
+        event: AUDIT_EVENTS.LOGOUT,
+        actorId: currentUser.id,
+        actorName: currentUser.name,
+      });
+    }
     setIsLoggedIn(false);
     setCurrentUser(null);
     setCurrentScreen('login');
-    localStorage.removeItem('currentUser');
+    setInactivityMinutes(5);
+    clearSession();
+    // La cache contiene i dati dell'utente che esce: non deve restare
+    // consultabile da chi accede dopo sulla stessa macchina.
+    clearOfflineCache();
   };
 
   const handleLanguageChange = (newLanguage) => {
@@ -108,67 +150,21 @@ function App() {
       <div className="App">
         {/* Dialog di avviso inattività */}
         {showWarning && (
-          <div style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: 'rgba(0, 0, 0, 0.5)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 9999
-          }}>
-            <div style={{
-              backgroundColor: 'white',
-              borderRadius: '8px',
-              padding: '32px',
-              maxWidth: '400px',
-              boxShadow: '0 10px 40px rgba(0, 0, 0, 0.2)',
-              textAlign: 'center'
-            }}>
-              <h2 style={{ margin: '0 0 16px 0', color: '#1a3a52' }}>
-                Sessione in scadenza
-              </h2>
-              <p style={{ margin: '0 0 24px 0', color: '#6b7280', lineHeight: '1.5' }}>
-                Non hai interagito con la pagina per 5 minuti. La tua sessione scadrà tra 30 secondi.
-              </p>
-              <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
-                <button
-                  onClick={dismissWarning}
-                  style={{
-                    padding: '10px 20px',
-                    backgroundColor: '#3b82f6',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '6px',
-                    cursor: 'pointer',
-                    fontSize: '14px',
-                    fontWeight: '600',
-                    transition: 'background-color 0.2s'
-                  }}
-                  onMouseOver={(e) => e.target.style.backgroundColor = '#2563eb'}
-                  onMouseOut={(e) => e.target.style.backgroundColor = '#3b82f6'}
-                >
+          <div className="modal-backdrop modal-backdrop--top">
+            <div className="modal-card modal-card--sm">
+              <div className="modal-header">
+                <h2>Sessione in scadenza</h2>
+              </div>
+              <div className="modal-body">
+                <p>
+                  Non hai interagito con la pagina per {inactivityMinutes} minuti. La tua sessione sta per scadere.
+                </p>
+              </div>
+              <div className="modal-footer">
+                <button className="btn-primary" onClick={dismissWarning}>
                   Continua sessione
                 </button>
-                <button
-                  onClick={handleLogout}
-                  style={{
-                    padding: '10px 20px',
-                    backgroundColor: '#ef4444',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '6px',
-                    cursor: 'pointer',
-                    fontSize: '14px',
-                    fontWeight: '600',
-                    transition: 'background-color 0.2s'
-                  }}
-                  onMouseOver={(e) => e.target.style.backgroundColor = '#dc2626'}
-                  onMouseOut={(e) => e.target.style.backgroundColor = '#ef4444'}
-                >
+                <button className="btn-secondary" onClick={handleLogout}>
                   Logout
                 </button>
               </div>
@@ -176,29 +172,54 @@ function App() {
           </div>
         )}
 
-        {(currentScreen === 'login' || currentScreen === 'forceChangePassword') && (
-          <LoginScreen
-            onLogin={handleLogin}
-            language={language}
-            onLanguageChange={handleLanguageChange}
-          />
-        )}
-        {currentScreen === 'forceChangePassword' && currentUser && (
-          <ForceChangePasswordModal
-            user={currentUser}
-            language={language}
-            onPasswordChanged={handlePasswordChanged}
-          />
-        )}
-        {currentScreen === 'dashboard' && currentUser && (
-          <DashboardScreen
-            currentUser={currentUser}
-            onLogout={handleLogout}
-            language={language}
-            onLanguageChange={handleLanguageChange}
-          />
-        )}
+        <ErrorBoundary
+          message="Errore nella schermata di accesso. Riprova o riavvia l'applicazione."
+          resetLabel="Riprova"
+          onReset={() => window.location.reload()}
+        >
+          {(currentScreen === 'login' || currentScreen === 'forceChangePassword') && (
+            <LoginScreen
+              onLogin={handleLogin}
+              language={language}
+              onLanguageChange={handleLanguageChange}
+            />
+          )}
+          {currentScreen === 'forceChangePassword' && currentUser && (
+            <ForceChangePasswordModal
+              user={currentUser}
+              language={language}
+              onPasswordChanged={handlePasswordChanged}
+            />
+          )}
+        </ErrorBoundary>
+        <ErrorBoundary
+          message="Errore nella dashboard. Verrai reindirizzato al login."
+          resetLabel="Torna al login"
+          onReset={handleLogout}
+        >
+          {currentScreen === 'dashboard' && currentUser && (
+            <DashboardScreen
+              currentUser={currentUser}
+              onLogout={handleLogout}
+              language={language}
+              onLanguageChange={handleLanguageChange}
+              onInactivityMinutesChange={setInactivityMinutes}
+            />
+          )}
+        </ErrorBoundary>
+
+
       </div>
+      <Snackbar
+        open={toast.open}
+        autoHideDuration={5000}
+        onClose={handleToastClose}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert onClose={handleToastClose} severity={toast.severity} sx={{ width: '100%' }}>
+          {toast.message}
+        </Alert>
+      </Snackbar>
     </ThemeProvider>
   );
 }

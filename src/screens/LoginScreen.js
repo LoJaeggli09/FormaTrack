@@ -1,15 +1,25 @@
 import React, { useState } from 'react';
-import { Monitor, Globe, Eye, EyeOff, ImageMinus } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { Globe, Eye, EyeOff, ExternalLink } from 'lucide-react';
 import { translate } from '../i18n';
+import { FORMATRACK_URL, FORMATRACK_LABEL, handleExternalClick } from '../utils/externalLink';
 import { authenticateUser } from '../data/users.supabase';
+import { createWorkspaceWithAdmin } from '../data/workspaces.supabase';
+import { writeAuditLog, AUDIT_EVENTS } from '../data/auditLog.supabase';
 
 const LoginScreen = ({ onLogin, language = 'it', onLanguageChange }) => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [showUsername, setShowUsername] = useState(false);
+  const [showCreateWorkspace, setShowCreateWorkspace] = useState(false);
+  const [workspaceName, setWorkspaceName] = useState('');
+  const [workspaceDescription, setWorkspaceDescription] = useState('');
+  const [workspaceError, setWorkspaceError] = useState('');
+  const [adminName, setAdminName] = useState('');
+  const [adminPassword, setAdminPassword] = useState('Abc123!');
+  const [showAdminPassword, setShowAdminPassword] = useState(false);
+
+  const [workspaceLoading, setWorkspaceLoading] = useState(false);
 
   const t = (key) => translate(key, language);
 
@@ -18,12 +28,12 @@ const LoginScreen = ({ onLogin, language = 'it', onLanguageChange }) => {
     setError('');
     const normalizedUsername = username.trim().replace(/\s+/g, ' ');
     const normalizedPassword = String(password ?? '');
-    
+
     if (!normalizedUsername) {
       setError(t('login.invalid'));
       return;
     }
-    
+
     if (!normalizedPassword.length) {
       setError(t('login.invalid'));
       return;
@@ -31,40 +41,69 @@ const LoginScreen = ({ onLogin, language = 'it', onLanguageChange }) => {
 
     // Autenticazione con database utenti
     const user = await authenticateUser(normalizedUsername, normalizedPassword);
-    
+
     if (user) {
       onLogin(user);
     } else {
+      await writeAuditLog({
+        event: AUDIT_EVENTS.LOGIN_FAILED,
+        actorName: normalizedUsername,
+        details: { reason: 'invalid_credentials' },
+      });
       setError(t('login.invalid'));
     }
   };
 
+  const handleCreateWorkspace = async () => {
+    setWorkspaceError('');
+    if (!workspaceName.trim()) {
+      setWorkspaceError(t('login.workspaceNameRequired'));
+      return;
+    }
+    if (!adminName.trim()) {
+      setWorkspaceError(t('manage.workspaceAdminName') + ' ' + t('manage.fillRequired'));
+      return;
+    }
+
+    setWorkspaceLoading(true);
+    try {
+      await createWorkspaceWithAdmin({
+        name: workspaceName.trim(),
+        description: workspaceDescription.trim() || null,
+        ownerId: null,
+        adminName,
+        adminRole: 'admin',
+        defaultPassword: adminPassword || 'Abc123!'
+      });
+
+      alert(
+        t('manage.createWorkspaceSuccessWithAdmin')
+          .replace('{workspaceName}', workspaceName.trim())
+          .replace('{adminName}', adminName.trim())
+      );
+
+      setShowCreateWorkspace(false);
+      setWorkspaceName('');
+      setWorkspaceDescription('');
+      setAdminName('');
+      setAdminPassword('Abc123!');
+    } catch (error) {
+      console.error('Errore creazione area di lavoro:', error);
+      setWorkspaceError(error?.message || t('login.createWorkspaceError'));
+    } finally {
+      setWorkspaceLoading(false);
+    }
+  };
+
   return (
-    <motion.div
-      className="login-screen"
-      style={{
-        backgroundImage: `linear-gradient(135deg, rgba(248, 250, 252, 0.85) 0%, rgba(232, 236, 241, 0.85) 100%), url(${process.env.PUBLIC_URL}/sfondo-lock.jpeg)`,
-        backgroundSize: 'cover',
-        backgroundPosition: 'center',
-        backgroundRepeat: 'no-repeat',
-        backgroundAttachment: 'fixed'
-      }}
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      transition={{ duration: 0.5 }}
-    >
+    <div className="login-screen">
       <div className="login-container">
-        <motion.div
-          className="login-card"
-          initial={{ y: 50, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          transition={{ duration: 0.6, delay: 0.2 }}
-        >
+        <div className="login-card">
           {onLanguageChange && (
             <div className="login-language-selector">
               <Globe size={16} />
-              <select 
-                value={language} 
+              <select
+                value={language}
                 onChange={(e) => onLanguageChange(e.target.value)}
                 className="language-select"
               >
@@ -75,9 +114,9 @@ const LoginScreen = ({ onLogin, language = 'it', onLanguageChange }) => {
               </select>
             </div>
           )}
-          
+
           <div className="login-logo">
-            <img src="./LAD_icona_blu.png" alt="Logo" style={{ width: '150px', height: 'auto' }} />
+            <img src="/LAD_icona_blu.png" alt="Logo" style={{ width: '150px', height: 'auto' }} />
           </div>
 
           <div className="login-header">
@@ -89,62 +128,146 @@ const LoginScreen = ({ onLogin, language = 'it', onLanguageChange }) => {
             {error && <div className="login-error">{error}</div>}
 
             <div className="form-group">
-              <label htmlFor="username" style={{ textAlign: 'left', display: 'block', marginBottom: '5px' }}>{t('login.username')}</label>
+              <label htmlFor="username">{t('login.username')}</label>
               <input
                 type="text"
                 id="username"
                 placeholder={t('login.username')}
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                autoFocus                style={{ paddingLeft: '12px', textAlign: 'left' }}              />
+                autoFocus
+              />
             </div>
 
             <div className="form-group">
-              <label htmlFor="password" style={{ textAlign: 'left', display: 'block', marginBottom: '5px' }}>{t('login.password')}</label>
-              <div style={{ position: 'relative' }}>
+              <label htmlFor="password">{t('login.password')}</label>
+              <div className="password-input-wrapper">
                 <input
-                  type={showPassword ? "text" : "password"}
+                  type={showPassword ? 'text' : 'password'}
                   id="password"
                   placeholder="••••••••"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  style={{ width: '100%', padding: '10px 45px 10px 12px', borderRadius: '6px', border: '1px solid #ddd', fontSize: '14px', boxSizing: 'border-box' }}
+                  className="password-input"
                 />
                 <button
                   type="button"
+                  className="password-toggle-button"
                   onClick={() => setShowPassword(!showPassword)}
-                  style={{
-                    position: 'absolute',
-                    right: '12px',
-                    top: '50%',
-                    transform: 'translateY(-50%)',
-                    background: 'none',
-                    border: 'none',
-                    cursor: 'pointer',
-                    padding: '4px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    color: '#6b7280',
-                    zIndex: 10
-                  }}
+                  aria-label={showPassword ? t('settings.password.current') : t('login.password')}
                 >
                   {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                 </button>
               </div>
             </div>
 
-            <motion.button
-              type="submit"
-              className="login-button"
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-            >
+            <button type="submit" className="login-button">
               {t('login.button')}
-            </motion.button>
+            </button>
           </form>
-        </motion.div>
+
+          <div className="login-secondary-action">
+            <button
+              type="button"
+              className="login-button-secondary"
+              onClick={() => setShowCreateWorkspace((prev) => !prev)}
+            >
+              {showCreateWorkspace ? t('login.hideCreateWorkspace') : t('login.createWorkspace')}
+            </button>
+          </div>
+
+          {showCreateWorkspace && (
+            <div className="workspace-form">
+              <h3>{t('login.createWorkspaceTitle')}</h3>
+              <div className="form-group">
+                <label>{t('login.workspaceName')}</label>
+                <input
+                  type="text"
+                  value={workspaceName}
+                  onChange={(e) => setWorkspaceName(e.target.value)}
+                  placeholder={t('login.workspaceName')}
+                />
+              </div>
+              <div className="form-group">
+                <label>{t('login.workspaceDescription')}</label>
+                <textarea
+                  value={workspaceDescription}
+                  onChange={(e) => setWorkspaceDescription(e.target.value)}
+                  placeholder={t('login.workspaceDescription')}
+                  rows={3}
+                />
+              </div>
+
+              <div className="form-group">
+                <label>{t('manage.workspaceAdminName')}</label>
+                <input
+                  type="text"
+                  value={adminName}
+                  onChange={(e) => setAdminName(e.target.value)}
+                  placeholder="Nome Cognome"
+                />
+              </div>
+
+              <div className="form-group">
+                <label>{t('manage.defaultPassword')}</label>
+                <div className="password-input-wrapper">
+                  <input
+                    type={showAdminPassword ? 'text' : 'password'}
+                    value={adminPassword}
+                    onChange={(e) => setAdminPassword(e.target.value)}
+                    placeholder="Abc123!"
+                    className="password-input"
+                  />
+                  <button
+                    type="button"
+                    className="password-toggle-button"
+                    onClick={() => setShowAdminPassword(!showAdminPassword)}
+                    aria-label={t('manage.defaultPassword')}
+                  >
+                    {showAdminPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                </div>
+              </div>
+
+              {workspaceError && <div className="login-error" style={{ marginBottom: '12px' }}>{workspaceError}</div>}
+              <div className="workspace-form-actions">
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => {
+                    setShowCreateWorkspace(false);
+                    setWorkspaceError('');
+                  }}
+                >
+                  {t('login.cancel')}
+                </button>
+                <button
+                  type="button"
+                  className="login-button"
+                  onClick={handleCreateWorkspace}
+                  disabled={workspaceLoading}
+                >
+                  {t('login.createWorkspace')}
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div className="login-footer-link">
+            <a
+              className="external-link"
+              href={FORMATRACK_URL}
+              onClick={handleExternalClick(FORMATRACK_URL)}
+              target="_blank"
+              rel="noreferrer"
+            >
+              {FORMATRACK_LABEL}
+              <ExternalLink size={13} />
+            </a>
+          </div>
+        </div>
       </div>
-    </motion.div>
+    </div>
   );
 };
 

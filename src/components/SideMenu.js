@@ -1,30 +1,38 @@
 import React, { useRef } from 'react';
-import { LayoutDashboard, Target, BarChart3, Settings, LogOut, Inbox, Users, Search, FileDown, Award } from 'lucide-react';
+import { LayoutDashboard, CalendarDays, StickyNote, ClipboardList, CalendarClock, CalendarX, Award, BarChart3, Settings, LogOut, Users, LifeBuoy } from 'lucide-react';
 import { translate } from '../i18n';
 import { useKeyboardNavigation, useFocusTrap, useAnnounce } from '../hooks/accessibility';
+import { FORMATRACK_URL, FORMATRACK_LABEL, handleExternalClick } from '../utils/externalLink';
 
-const SideMenu = ({ isOpen, onClose = () => {}, onLogout, onNavigate, currentView, language = 'it', isTrainer = false, isAdmin = false, unreadNotificationsCount = 0 }) => {
+/**
+ * @param {object} props
+ * @param {Object<string, number>} [props.badges] - voci con promemoria aperti: { activities: 2 }
+ */
+const SideMenu = ({
+  isOpen,
+  onClose = () => {},
+  onLogout,
+  onNavigate,
+  currentView,
+  language = 'it',
+  isAdmin = false,
+  canSelectStudents = false,
+  badges = {},
+}) => {
   const t = (key) => translate(key, language);
   const menuRef = useRef(null);
   const announce = useAnnounce();
 
-  const menuItems = isAdmin ? [
+  const menuItems = [
     { icon: <LayoutDashboard size={20} />, label: t('menu.dashboard'), id: 'dashboard' },
-    { icon: <Target size={20} />, label: t('objectives.title'), id: 'objectives' },
+    { icon: <CalendarDays size={20} />, label: t('calendar.title'), id: 'calendar' },
+    { icon: <StickyNote size={20} />, label: t('notes.title'), id: 'notes' },
+    { icon: <ClipboardList size={20} />, label: t('activities.title'), id: 'activities' },
+    { icon: <CalendarClock size={20} />, label: t('booking.title'), id: 'booking' },
+    { icon: <CalendarX size={20} />, label: t('absences.title'), id: 'absences' },
     { icon: <Award size={20} />, label: t('grading.title'), id: 'grading' },
-    { icon: <BarChart3 size={20} />, label: t('progress.title'), id: 'statistics' },
-    { icon: <FileDown size={20} />, label: t('export.title'), id: 'export' },
-    { icon: <Users size={20} />, label: t('manage.title'), id: 'manage' },
-    { icon: <Settings size={20} />, label: t('menu.settings'), id: 'settings' },
-  ] : [
-    { icon: <LayoutDashboard size={20} />, label: t('menu.dashboard'), id: 'dashboard' },
-    { icon: <Target size={20} />, label: t('objectives.title'), id: 'objectives' },
-    { icon: <Award size={20} />, label: t('grading.title'), id: 'grading' },
-    { icon: <Search size={20} />, label: t('search.title'), id: 'search' },
-    { icon: <BarChart3 size={20} />, label: t('progress.title'), id: 'statistics' },
-    { icon: <FileDown size={20} />, label: t('export.title'), id: 'export' },
-    { icon: <Inbox size={20} />, label: t('inbox.title'), id: 'inbox' },
-    ...(isTrainer ? [{ icon: <Users size={20} />, label: t('manage.title'), id: 'manage' }] : []),
+    ...(canSelectStudents ? [{ icon: <BarChart3 size={20} />, label: t('data.title'), id: 'data' }] : []),
+    ...(isAdmin ? [{ icon: <Users size={20} />, label: t('manage.title'), id: 'manage' }] : []),
     { icon: <Settings size={20} />, label: t('menu.settings'), id: 'settings' },
   ];
 
@@ -58,12 +66,31 @@ const SideMenu = ({ isOpen, onClose = () => {}, onLogout, onNavigate, currentVie
             >
               {item.icon}
               <span>{item.label}</span>
-              {item.id === 'inbox' && unreadNotificationsCount > 0 && (
-                <span className="menu-notification-dot" aria-label={`${unreadNotificationsCount} notifiche non lette`} />
+              {badges[item.id] > 0 && (
+                <span
+                  className="menu-badge"
+                  aria-label={`${badges[item.id]} ${t('reminders.pendingHere')}`}
+                  title={t('reminders.pendingHere')}
+                >
+                  {badges[item.id] > 99 ? '99+' : badges[item.id]}
+                </span>
               )}
             </button>
           ))}
         </nav>
+
+        <a
+          className="menu-support-link"
+          href={FORMATRACK_URL}
+          onClick={handleExternalClick(FORMATRACK_URL)}
+          target="_blank"
+          rel="noreferrer"
+          title={FORMATRACK_LABEL}
+          tabIndex={isOpen ? 0 : -1}
+        >
+          <LifeBuoy size={18} />
+          <span>{t('menu.support')}</span>
+        </a>
 
         <button
           className="logout-button"

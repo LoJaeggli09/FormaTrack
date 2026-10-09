@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "formatrack-web",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "react-start"],
+      "port": 3003
+    }
+  ]
+}

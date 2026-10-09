@@ -1,33 +1,54 @@
-import React, { useState } from 'react';
-import { Bell, Moon, Globe, Lock, Eye, EyeOff, Download, LayoutTemplate, ListFilter, MessageSquare, PanelTop, Minimize2, Users } from 'lucide-react';
-import { Switch, FormControlLabel, Select, MenuItem, FormControl, InputLabel, Box } from '@mui/material';
+import React, { useState, useEffect } from 'react';
+import { Lock, Eye, EyeOff, Download, RefreshCw, CheckCircle, AlertCircle, Loader, ExternalLink } from 'lucide-react';
 import { translate } from '../i18n';
-import { loadAllProgress } from '../data/progress.supabase';
-import { updateUserPassword } from '../data/users.supabase';
-import { trainingPlan } from '../data/trainingPlan';
-import { useTheme } from './ThemeProvider';
+import { updateUserPassword, verifyUserPassword } from '../data/users.supabase';
 import APP_VERSION from '../appVersion';
+import { FORMATRACK_URL, FORMATRACK_LABEL, handleExternalClick } from '../utils/externalLink';
 
 const DEFAULT_SETTINGS = {
-  notifications: true,
   startView: 'dashboard',
-  showOnlyIncompleteObjectives: false,
-  autoOpenCommentedObjectives: true,
   compactMode: false,
   reducedMotion: false,
   rememberSelectedStudent: true,
-  lastSelectedStudentId: null
+  lastSelectedStudentId: null,
+  inactivityMinutes: 5,
+  remindersEnabled: true
 };
 
+/** Opzioni proposte per il logout automatico per inattività. */
+const INACTIVITY_OPTIONS = [3, 5, 10, 15, 30, 60];
+
+/** Interruttore a due stati: un campo di spunta con ruolo "switch", disegnato dal CSS. */
+const Toggle = ({ id, checked, onChange, disabled = false }) => (
+  <label className="toggle">
+    <input id={id} type="checkbox" role="switch" checked={checked} onChange={onChange} disabled={disabled} />
+    <span className="toggle-track" aria-hidden="true" />
+  </label>
+);
+
+/** Riga di impostazione: titolo e spiegazione a sinistra, controllo a destra. */
+const SettingRow = ({ id, title, description, children, extra = null }) => (
+  <>
+    <div className="setting-row">
+      <div className="setting-text">
+        {id
+          ? <label htmlFor={id} className="setting-title">{title}</label>
+          : <span className="setting-title">{title}</span>}
+        {description && <p className="setting-desc">{description}</p>}
+      </div>
+      <div className="setting-control">{children}</div>
+    </div>
+    {extra}
+  </>
+);
+
 const SettingsSection = ({
-  onResetProgress,
   language,
   onLanguageChange,
   userRole = 'student',
   isReadOnly = false,
   currentUser = null,
   onPasswordChange = null,
-  completedObjectives = {},
   selectedStudent = null,
   students = [],
   onStudentSelect = null,
@@ -35,7 +56,6 @@ const SettingsSection = ({
   onUserSettingsChange = null,
   availableStartViews = []
 }) => {
-  const { mode, toggleMode } = useTheme();
   const [showPasswordChange, setShowPasswordChange] = useState(false);
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -45,13 +65,74 @@ const SettingsSection = ({
   const [showCurrentPassword, setShowCurrentPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  
+
+  // ── Stato Auto-Update ────────────────────────────────────────────────────────
+  const [updateState, setUpdateState] = useState({
+    status: 'idle', // idle | checking | available | not-available | downloading | downloaded | error
+    version: null,
+    progress: 0,
+    errorMessage: null,
+  });
+
+  // Registra listener aggiornamenti status dal main process
+  useEffect(() => {
+    if (!window.electronAPI?.updater?.onUpdateStatus) return;
+    const cleanup = window.electronAPI.updater.onUpdateStatus((data) => {
+      switch (data.event) {
+        case 'checking-for-update':
+          setUpdateState({ status: 'checking', version: null, progress: 0, errorMessage: null });
+          break;
+        case 'update-available':
+          setUpdateState({ status: 'available', version: data.version, progress: 0, errorMessage: null });
+          break;
+        case 'update-not-available':
+          setUpdateState({ status: 'not-available', version: data.version, progress: 0, errorMessage: null });
+          setTimeout(() => setUpdateState((prev) => ({ ...prev, status: 'idle' })), 6000);
+          break;
+        case 'download-progress':
+          setUpdateState((prev) => ({ ...prev, status: 'downloading', progress: data.percent }));
+          break;
+        case 'update-downloaded':
+          setUpdateState({ status: 'downloaded', version: data.version, progress: 100, errorMessage: null });
+          break;
+        case 'error':
+          setUpdateState({ status: 'error', version: null, progress: 0, errorMessage: data.message });
+          setTimeout(() => setUpdateState((prev) => ({ ...prev, status: 'idle' })), 10000);
+          break;
+        default:
+          break;
+      }
+    });
+    return cleanup;
+  }, []);
+
+  const handleCheckForUpdates = async () => {
+    if (!window.electronAPI?.updater?.checkForUpdates) {
+      setUpdateState({ status: 'error', version: null, progress: 0, errorMessage: 'Funzione disponibile solo nell\'app desktop Electron.' });
+      setTimeout(() => setUpdateState((prev) => ({ ...prev, status: 'idle' })), 6000);
+      return;
+    }
+    setUpdateState({ status: 'checking', version: null, progress: 0, errorMessage: null });
+    const result = await window.electronAPI.updater.checkForUpdates();
+    if (!result.success) {
+      setUpdateState({ status: 'error', version: null, progress: 0, errorMessage: result.error });
+      setTimeout(() => setUpdateState((prev) => ({ ...prev, status: 'idle' })), 10000);
+    }
+  };
+
+  const handleInstallUpdate = () => {
+    if (!window.electronAPI?.updater?.installUpdate) {
+      alert('Funzione disponibile solo nell\'app desktop Electron.');
+      return;
+    }
+    window.electronAPI.updater.installUpdate();
+  };
+
   const settings = {
     ...DEFAULT_SETTINGS,
     ...userSettings
   };
   const canChooseStudent = userRole === 'trainer' || userRole === 'admin' || userRole === 'inspector';
-  const activeStudent = canChooseStudent ? selectedStudent : currentUser;
   const t = (key) => translate(key, language);
 
   const updateSettings = (updates) => {
@@ -68,70 +149,6 @@ const SettingsSection = ({
   const handleLanguageChange = (e) => {
     if (isReadOnly) return;
     onLanguageChange(e.target.value);
-  };
-
-  const handleDarkModeToggle = () => {
-    if (isReadOnly) return;
-    toggleMode();
-  };
-
-  const handleResetProgress = () => {
-    if (isReadOnly) return;
-    if (window.confirm(t('alertResetConfirm'))) {
-      onResetProgress();
-    }
-  };
-
-  const handleDownloadObjectives = async () => {
-    if (!activeStudent) {
-      return;
-    }
-
-    const objectivesToExport = canChooseStudent
-      ? (await loadAllProgress(activeStudent.id)).completedObjectives
-      : completedObjectives;
-
-    let content = `RAPPORTO OBIETTIVI DI FORMAZIONE\n`;
-    content += `=====================================\n\n`;
-    content += `Apprendista: ${activeStudent.name || 'N/A'}\n`;
-    content += `Numero: ${activeStudent.studentNumber || 'N/A'}\n`;
-    content += `Anno di formazione: ${activeStudent.formationYear || 'N/A'}\n`;
-    content += `Data: ${new Date().toLocaleDateString('it-IT')}\n\n`;
-    content += `=====================================\n\n`;
-
-    let completedCount = 0;
-    let totalCount = 0;
-
-    trainingPlan.competenceFields.forEach(field => {
-      content += `CAMPO: ${field.id} - ${translate(`field.${field.id}.name`, language)}\n`;
-      content += `---\n`;
-
-      field.competencies.forEach(competency => {
-        competency.objectives.forEach(objective => {
-          totalCount++;
-          const isCompleted = objectivesToExport[objective.id];
-          if (isCompleted) completedCount++;
-          
-          const status = isCompleted ? t('settings.export.completed') : t('settings.export.notCompleted');
-          content += `${objective.id} - ${status}\n`;
-          content += `   ${translate(`objective.${objective.id}`, language)}\n\n`;
-        });
-      });
-      content += `\n`;
-    });
-
-    content += `=====================================\n`;
-    content += `RIEPILOGO\n`;
-    content += `Obiettivi Completati: ${completedCount}/${totalCount}\n`;
-    content += `Percentuale: ${totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0}%\n`;
-
-    const element = document.createElement('a');
-    element.setAttribute('href', 'data:text/plain;charset=utf-8,' + encodeURIComponent(content));
-    element.setAttribute('download', `Obiettivi_${(activeStudent.name || 'studente').replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.txt`);
-    element.style.display = 'none';
-    document.body.appendChild(element);
-    element.click();
-    document.body.removeChild(element);
   };
 
   const handleChangePassword = async (e) => {
@@ -199,9 +216,9 @@ const SettingsSection = ({
       return;
     }
 
-    // Verifica password corrente confrontando con il valore nel profilo utente
-    const validCurrentPassword = (currentUser.password || '').trim();
-    if (currentValue !== validCurrentPassword) {
+    // Verifica la password corrente contro l'hash bcrypt letto dal database
+    const isCurrentValid = await verifyUserPassword(currentUser.id, currentValue);
+    if (!isCurrentValid) {
       setPasswordError(t('settings.password.incorrect'));
       return;
     }
@@ -252,534 +269,360 @@ const SettingsSection = ({
     { key: 'passwordsEqual', label: t('settings.password.req.match') }
   ];
 
+  const updateBusy = updateState.status === 'checking' || updateState.status === 'downloading';
+  const minutesLabel = (minutes) => t('settings.inactivityTimeout.minutes').replace('{count}', minutes);
+
+  const updateStatusLines = updateState.status !== 'idle' && (
+    <div className="setting-extra">
+      <div className="update-status">
+        {updateState.status === 'checking' && (
+          <div className="update-line is-loading">
+            <Loader size={16} />
+            <span>{t('settings.updates.checking') || 'Controllo aggiornamenti in corso...'}</span>
+          </div>
+        )}
+        {updateState.status === 'not-available' && (
+          <div className="update-line is-ok">
+            <CheckCircle size={16} />
+            <span>{t('settings.updates.upToDate') || 'L\'applicazione è aggiornata all\'ultima versione.'}</span>
+          </div>
+        )}
+        {updateState.status === 'available' && (
+          <div className="update-line is-info">
+            <Download size={16} />
+            <span>
+              {t('settings.updates.available') || 'Nuova versione disponibile:'} <strong>{updateState.version}</strong>
+              {' — '}{t('settings.updates.downloading') || 'Download in corso automaticamente...'}
+            </span>
+          </div>
+        )}
+        {updateState.status === 'downloading' && (
+          <div className="update-download">
+            <div className="update-line is-info">
+              <Download size={16} />
+              <span>{t('settings.updates.downloadProgress') || 'Download aggiornamento:'} <strong>{updateState.progress}%</strong></span>
+            </div>
+            <div className="progress-track">
+              <div className="progress-fill" style={{ width: `${updateState.progress}%` }} />
+            </div>
+          </div>
+        )}
+        {updateState.status === 'downloaded' && (
+          <div className="update-line is-ok">
+            <CheckCircle size={16} />
+            <span>
+              {t('settings.updates.ready') || 'Versione'} <strong>{updateState.version}</strong> {t('settings.updates.readyInstall') || 'pronta — clicca su Installa e Riavvia.'}
+            </span>
+          </div>
+        )}
+        {updateState.status === 'error' && (
+          <div className="update-line is-error">
+            <AlertCircle size={16} />
+            <span>{updateState.errorMessage || t('settings.updates.error') || 'Errore durante il controllo degli aggiornamenti.'}</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
+  const passwordForm = showPasswordChange && !isReadOnly && (
+    <form onSubmit={handleChangePassword} className="setting-extra password-change-form">
+      <div className="password-change-layout">
+        <div className="password-form-panel">
+          {passwordError && (
+            <div className="notice notice-error">
+              {passwordError}
+            </div>
+          )}
+          {passwordSuccess && (
+            <div className="notice notice-success">
+              {passwordSuccess}
+            </div>
+          )}
+          <div className="form-group">
+            <label htmlFor="pw-current">{t('settings.password.current') || 'Password Attuale'}</label>
+            <div className="password-input-wrapper">
+              <input
+                id="pw-current"
+                type={showCurrentPassword ? "text" : "password"}
+                value={currentPassword}
+                onChange={(e) => setCurrentPassword(e.target.value)}
+                placeholder={t('settings.password.currentPlaceholder')}
+                className="password-input"
+              />
+              <button
+                type="button"
+                className="password-toggle-button"
+                onClick={() => setShowCurrentPassword(!showCurrentPassword)}
+              >
+                {showCurrentPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+              </button>
+            </div>
+          </div>
+          <div className="form-group">
+            <label htmlFor="pw-new">{t('settings.password.new') || 'Nuova Password'}</label>
+            <div className="password-input-wrapper">
+              <input
+                id="pw-new"
+                type={showNewPassword ? "text" : "password"}
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                placeholder={t('settings.password.newPlaceholder')}
+                className="password-input"
+              />
+              <button
+                type="button"
+                className="password-toggle-button"
+                onClick={() => setShowNewPassword(!showNewPassword)}
+              >
+                {showNewPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+              </button>
+            </div>
+          </div>
+          <div className="form-group">
+            <label htmlFor="pw-confirm">{t('settings.password.confirm') || 'Conferma Password'}</label>
+            <div className="password-input-wrapper">
+              <input
+                id="pw-confirm"
+                type={showConfirmPassword ? "text" : "password"}
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                placeholder={t('settings.password.confirmPlaceholder')}
+                className="password-input"
+              />
+              <button
+                type="button"
+                className="password-toggle-button"
+                onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+              >
+                {showConfirmPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+              </button>
+            </div>
+          </div>
+          <button type="submit" className="btn-primary">
+            {t('settings.savePassword') || 'Salva Nuova Password'}
+          </button>
+        </div>
+
+        <aside className="password-requirements-card" aria-label={t('settings.password.requirementsTitle')}>
+          <h4>{t('settings.password.requirementsTitle')}</h4>
+          <ul>
+            {passwordRequirements.map((requirement) => {
+              const isPassed = livePasswordChecks[requirement.key];
+              return (
+                <li key={requirement.key} className={isPassed ? 'is-valid' : 'is-invalid'}>
+                  <span className="req-dot" aria-hidden="true" />
+                  <span>{requirement.label}</span>
+                </li>
+              );
+            })}
+          </ul>
+        </aside>
+      </div>
+    </form>
+  );
+
   return (
     <section className="settings-section">
       <div className="section-title">{t('settings.title')}</div>
       {isReadOnly && (
-        <p style={{ marginBottom: '16px', color: 'var(--text-secondary)' }}>
+        <p className="settings-readonly">
           {t('settings.readOnlyNotice')}
         </p>
       )}
 
-      <div className="settings-grid">
-        {/* Notifiche */}
-        <div className="settings-card">
-          <div className="settings-card-header">
-            <div className="settings-icon">
-              <Bell size={24} color="var(--text-primary)" />
-            </div>
-            <div>
-              <h3>{t('settings.notifications')}</h3>
-              <p>{t('settings.notifications.desc')}</p>
-            </div>
-          </div>
-          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mt: 2 }}>
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={Boolean(settings.notifications)}
-                  onChange={() => handleToggleSetting('notifications')}
-                  disabled={isReadOnly}
-                  color="primary"
-                />
-              }
-              label={settings.notifications ? t('settings.enabled') : t('settings.disabled')}
-            />
-          </Box>
-        </div>
+      <div className="settings-groups">
+        {/* Interfaccia */}
+        <section className="settings-group" aria-labelledby="settings-group-interface">
+          <h2 className="settings-group-title" id="settings-group-interface">{t('settings.group.interface')}</h2>
 
-        {/* Modalità Scura */}
-        <div className="settings-card">
-          <div className="settings-card-header">
-            <div className="settings-icon">
-              <Moon size={24} color="var(--text-primary)" />
-            </div>
-            <div>
-              <h3>{t('settings.darkMode')}</h3>
-              <p>{t('settings.darkMode.desc')}</p>
-            </div>
-          </div>
-          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mt: 2 }}>
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={mode === 'dark'}
-                  onChange={handleDarkModeToggle}
-                  disabled={isReadOnly}
-                  color="primary"
-                />
-              }
-              label={mode === 'dark' ? t('settings.enabled') : t('settings.disabled')}
-            />
-          </Box>
-        </div>
+          <SettingRow id="setting-language" title={t('settings.language')} description={t('settings.language.desc')}>
+            <select
+              id="setting-language"
+              className="setting-select"
+              value={language}
+              onChange={handleLanguageChange}
+              disabled={isReadOnly}
+            >
+              <option value="it">Italiano</option>
+              <option value="en">English</option>
+              <option value="de">Deutsch</option>
+              <option value="fr">Français</option>
+            </select>
+          </SettingRow>
 
-        <div className="settings-card">
-          <div className="settings-card-header">
-            <div className="settings-icon">
-              <Minimize2 size={24} color="var(--text-primary)" />
-            </div>
-            <div>
-              <h3>{t('settings.compactMode')}</h3>
-              <p>{t('settings.compactMode.desc')}</p>
-            </div>
-          </div>
-          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mt: 2 }}>
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={Boolean(settings.compactMode)}
-                  onChange={() => handleToggleSetting('compactMode')}
-                  disabled={isReadOnly}
-                  color="primary"
-                />
-              }
-              label={settings.compactMode ? t('settings.enabled') : t('settings.disabled')}
+          <SettingRow id="setting-compact" title={t('settings.compactMode')} description={t('settings.compactMode.desc')}>
+            <Toggle
+              id="setting-compact"
+              checked={Boolean(settings.compactMode)}
+              onChange={() => handleToggleSetting('compactMode')}
+              disabled={isReadOnly}
             />
-          </Box>
-        </div>
+          </SettingRow>
 
-        <div className="settings-card">
-          <div className="settings-card-header">
-            <div className="settings-icon">
-              <PanelTop size={24} color="var(--text-primary)" />
-            </div>
-            <div>
-              <h3>{t('settings.reducedMotion')}</h3>
-              <p>{t('settings.reducedMotion.desc')}</p>
-            </div>
-          </div>
-          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mt: 2 }}>
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={Boolean(settings.reducedMotion)}
-                  onChange={() => handleToggleSetting('reducedMotion')}
-                  disabled={isReadOnly}
-                  color="primary"
-                />
-              }
-              label={settings.reducedMotion ? t('settings.enabled') : t('settings.disabled')}
+          <SettingRow id="setting-motion" title={t('settings.reducedMotion')} description={t('settings.reducedMotion.desc')}>
+            <Toggle
+              id="setting-motion"
+              checked={Boolean(settings.reducedMotion)}
+              onChange={() => handleToggleSetting('reducedMotion')}
+              disabled={isReadOnly}
             />
-          </Box>
-        </div>
+          </SettingRow>
+        </section>
 
-        {/* Lingua */}
-        <div className="settings-card settings-card-full">
-          <div className="settings-card-header">
-            <div className="settings-icon">
-              <Globe size={24} color="var(--text-primary)" />
-            </div>
-            <div>
-              <h3>{t('settings.language')}</h3>
-              <p>{t('settings.language.desc')}</p>
-            </div>
-          </div>
-          <Box sx={{ mt: 2, minWidth: 200 }}>
-            <FormControl fullWidth>
-              <InputLabel>Lingua</InputLabel>
-              <Select
-                value={language}
-                onChange={handleLanguageChange}
+        {/* Avvio e navigazione */}
+        <section className="settings-group" aria-labelledby="settings-group-navigation">
+          <h2 className="settings-group-title" id="settings-group-navigation">{t('settings.group.navigation')}</h2>
+
+          <SettingRow id="setting-start-view" title={t('settings.startView')} description={t('settings.startView.desc')}>
+            <select
+              id="setting-start-view"
+              className="setting-select"
+              value={settings.startView}
+              onChange={(e) => updateSettings({ startView: e.target.value })}
+              disabled={isReadOnly}
+            >
+              {availableStartViews.map((view) => (
+                <option key={view.value} value={view.value}>{view.label}</option>
+              ))}
+            </select>
+          </SettingRow>
+
+          {canChooseStudent && (
+            <SettingRow
+              id="setting-remember-student"
+              title={t('settings.rememberSelectedStudent')}
+              description={t('settings.rememberSelectedStudent.desc')}
+            >
+              <Toggle
+                id="setting-remember-student"
+                checked={Boolean(settings.rememberSelectedStudent)}
+                onChange={() => updateSettings({
+                  rememberSelectedStudent: !settings.rememberSelectedStudent,
+                  lastSelectedStudentId: settings.rememberSelectedStudent ? null : selectedStudent?.id || settings.lastSelectedStudentId || null
+                })}
                 disabled={isReadOnly}
-                label="Lingua"
-              >
-                <MenuItem value="it">Italiano</MenuItem>
-                <MenuItem value="en">English</MenuItem>
-                <MenuItem value="de">Deutsch</MenuItem>
-                <MenuItem value="fr">Français</MenuItem>
-              </Select>
-            </FormControl>
-          </Box>
-        </div>
+              />
+            </SettingRow>
+          )}
 
-        <div className="settings-card settings-card-full">
-          <div className="settings-card-header">
-            <div className="settings-icon">
-              <LayoutTemplate size={24} color="var(--text-primary)" />
-            </div>
-            <div>
-              <h3>{t('settings.startView')}</h3>
-              <p>{t('settings.startView.desc')}</p>
-            </div>
-          </div>
-          <Box sx={{ mt: 2, minWidth: 260 }}>
-            <FormControl fullWidth>
-              <InputLabel>{t('settings.startView')}</InputLabel>
-              <Select
-                value={settings.startView}
-                onChange={(e) => updateSettings({ startView: e.target.value })}
-                disabled={isReadOnly}
-                label={t('settings.startView')}
+          {canChooseStudent && students.length > 0 && (
+            <SettingRow id="setting-student" title={t('trainer.selectStudent')} description={t('settings.studentSelection.desc')}>
+              <select
+                id="setting-student"
+                className="setting-select"
+                value={selectedStudent?.id ?? ''}
+                onChange={(e) => {
+                  const nextStudent = students.find((student) => String(student.id) === e.target.value) || null;
+                  if (typeof onStudentSelect === 'function') {
+                    onStudentSelect(nextStudent);
+                  }
+                }}
               >
-                {availableStartViews.map((view) => (
-                  <MenuItem key={view.value} value={view.value}>{view.label}</MenuItem>
+                {students.map((student) => (
+                  <option key={student.id} value={student.id}>{student.name}</option>
                 ))}
-              </Select>
-            </FormControl>
-          </Box>
-        </div>
+              </select>
+            </SettingRow>
+          )}
+        </section>
 
-        <div className="settings-card settings-card-full settings-card-vertical">
-          <div className="settings-card-header">
-            <div className="settings-icon">
-              <ListFilter size={24} color="var(--text-primary)" />
-            </div>
-            <div>
-              <h3>{t('settings.objectivePreferences')}</h3>
-              <p>{t('settings.objectivePreferences.desc')}</p>
-            </div>
-          </div>
-          <div className="settings-preferences-list">
-            <div className="settings-preference-row">
-              <div>
-                <strong>{t('settings.showOnlyIncompleteObjectives')}</strong>
-                <p>{t('settings.showOnlyIncompleteObjectives.desc')}</p>
-              </div>
-              <Switch
-                checked={Boolean(settings.showOnlyIncompleteObjectives)}
-                onChange={() => handleToggleSetting('showOnlyIncompleteObjectives')}
-                disabled={isReadOnly}
-                color="primary"
-              />
-            </div>
-            <div className="settings-preference-row">
-              <div>
-                <strong>{t('settings.autoOpenCommentedObjectives')}</strong>
-                <p>{t('settings.autoOpenCommentedObjectives.desc')}</p>
-              </div>
-              <Switch
-                checked={Boolean(settings.autoOpenCommentedObjectives)}
-                onChange={() => handleToggleSetting('autoOpenCommentedObjectives')}
-                disabled={isReadOnly}
-                color="primary"
-              />
-            </div>
-          </div>
-        </div>
+        {/* Promemoria e sicurezza */}
+        <section className="settings-group" aria-labelledby="settings-group-security">
+          <h2 className="settings-group-title" id="settings-group-security">{t('settings.group.security')}</h2>
 
-        {canChooseStudent && (
-          <div className="settings-card settings-card-full settings-card-vertical">
-            <div className="settings-card-header">
-              <div className="settings-icon">
-                <Users size={24} color="var(--text-primary)" />
-              </div>
-              <div>
-                <h3>{t('settings.studentSelection')}</h3>
-                <p>{t('settings.studentSelection.desc')}</p>
-              </div>
-            </div>
-            <div className="settings-preferences-list">
-              <div className="settings-preference-row">
-                <div>
-                  <strong>{t('settings.rememberSelectedStudent')}</strong>
-                  <p>{t('settings.rememberSelectedStudent.desc')}</p>
-                </div>
-                <Switch
-                  checked={Boolean(settings.rememberSelectedStudent)}
-                  onChange={() => updateSettings({
-                    rememberSelectedStudent: !settings.rememberSelectedStudent,
-                    lastSelectedStudentId: settings.rememberSelectedStudent ? null : selectedStudent?.id || settings.lastSelectedStudentId || null
-                  })}
-                  disabled={isReadOnly}
-                  color="primary"
-                />
-              </div>
+          <SettingRow id="setting-reminders" title={t('settings.reminders')} description={t('settings.reminders.desc')}>
+            <Toggle
+              id="setting-reminders"
+              checked={settings.remindersEnabled !== false}
+              onChange={() => handleToggleSetting('remindersEnabled')}
+              disabled={isReadOnly}
+            />
+          </SettingRow>
 
-              {students.length > 0 && (
-                <Box sx={{ mt: 1, minWidth: 260 }}>
-                  <FormControl fullWidth>
-                    <InputLabel>{t('trainer.selectStudent')}</InputLabel>
-                    <Select
-                      value={selectedStudent?.id || ''}
-                      onChange={(e) => {
-                        const nextStudent = students.find((student) => student.id === e.target.value) || null;
-                        if (typeof onStudentSelect === 'function') {
-                          onStudentSelect(nextStudent);
-                        }
-                      }}
-                      label={t('trainer.selectStudent')}
-                    >
-                      {students.map((student) => (
-                        <MenuItem key={student.id} value={student.id}>{student.name}</MenuItem>
-                      ))}
-                    </Select>
-                  </FormControl>
-                </Box>
-              )}
-            </div>
-          </div>
-        )}
+          <SettingRow id="setting-inactivity" title={t('settings.inactivityTimeout')} description={t('settings.inactivityTimeout.desc')}>
+            <select
+              id="setting-inactivity"
+              className="setting-select"
+              value={settings.inactivityMinutes}
+              onChange={(e) => updateSettings({ inactivityMinutes: Number(e.target.value) })}
+              disabled={isReadOnly}
+            >
+              {INACTIVITY_OPTIONS.map((minutes) => (
+                <option key={minutes} value={minutes}>{minutesLabel(minutes)}</option>
+              ))}
+            </select>
+          </SettingRow>
 
-        <div className="settings-card settings-card-full settings-card-vertical">
-          <div className="settings-card-header">
-            <div className="settings-icon">
-              <MessageSquare size={24} color="var(--text-primary)" />
-            </div>
-            <div>
-              <h3>{t('settings.quickExport')}</h3>
-              <p>{t('settings.quickExport.desc')}</p>
-            </div>
-          </div>
-          <div className="settings-inline-actions">
+          <SettingRow
+            title={t('settings.changePassword') || 'Cambia Password'}
+            description={t('settings.changePassword.desc') || 'Modifica la tua password'}
+            extra={passwordForm}
+          >
             <button
               type="button"
-              className="btn-primary settings-action-button"
-              onClick={handleDownloadObjectives}
-              disabled={!activeStudent}
+              className="btn-secondary"
+              onClick={() => setShowPasswordChange(!showPasswordChange)}
+              disabled={isReadOnly}
+              aria-expanded={showPasswordChange}
             >
-              <Download size={16} />
-              {t('settings.quickExport.button')}
+              <Lock size={16} />
+              {showPasswordChange ? t('settings.cancel') : t('settings.changePasswordButton')}
             </button>
-            {activeStudent && (
-              <span className="settings-inline-hint">
-                {t('settings.quickExport.target')}: {activeStudent.name}
-              </span>
-            )}
-          </div>
-        </div>
+          </SettingRow>
+        </section>
 
+        {/* Applicazione */}
+        <section className="settings-group" aria-labelledby="settings-group-app">
+          <h2 className="settings-group-title" id="settings-group-app">{t('settings.group.app')}</h2>
 
+          <SettingRow title={t('settings.version')} description={t('settings.info')}>
+            <strong className="setting-value">Version {APP_VERSION}</strong>
+          </SettingRow>
 
-        {/* Cambio Password */}
-        <div className="settings-card settings-card-full settings-card-vertical">
-          <div className="settings-card-header">
-            <div className="settings-icon">
-              <Lock size={24} color="var(--text-primary)" />
-            </div>
-            <div>
-              <h3>{t('settings.changePassword') || 'Cambia Password'}</h3>
-              <p>{t('settings.changePassword.desc') || 'Modifica la tua password'}</p>
-            </div>
-          </div>
-          <button 
-            className="btn-secondary"
-            onClick={() => setShowPasswordChange(!showPasswordChange)}
-            disabled={isReadOnly}
-            aria-expanded={showPasswordChange}
-            style={{ 
-              marginTop: '10px',
-              width: 'auto',
-              padding: '8px 16px',
-              fontSize: '13px',
-              fontWeight: '600',
-              border: '2px solid #1a3a52',
-              backgroundColor: showPasswordChange ? 'var(--bg-tertiary)' : 'var(--primary-dark)',
-              color: showPasswordChange ? 'var(--primary-dark)' : '#ffffff',
-              borderRadius: '8px',
-              cursor: 'pointer',
-              transition: 'all 0.3s ease',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '8px',
-              margin: '10px 0 0 0',
-              alignSelf: 'flex-start'
-            }}
+          <SettingRow
+            title={t('settings.updates') || 'Aggiornamenti'}
+            description={t('settings.updates.desc') || 'Controlla e installa gli aggiornamenti dell\'applicazione'}
+            extra={updateStatusLines}
           >
-            <Lock size={16} />
-            {showPasswordChange ? t('settings.cancel') : t('settings.changePasswordButton')}
-          </button>
+            <div className="update-actions">
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={handleCheckForUpdates}
+                disabled={updateBusy}
+              >
+                <RefreshCw size={15} />
+                {t('settings.updates.checkButton') || 'Controlla aggiornamenti'}
+              </button>
 
-          {showPasswordChange && !isReadOnly && (
-            <form onSubmit={handleChangePassword} style={{ marginTop: '20px', width: '100%', maxWidth: '100%' }}>
-              <div className="password-change-layout">
-                <aside className="password-requirements-card" aria-label={t('settings.password.requirementsTitle')}>
-                  <h4>{t('settings.password.requirementsTitle')}</h4>
-                  <ul>
-                    {passwordRequirements.map((requirement) => {
-                      const isPassed = livePasswordChecks[requirement.key];
-                      return (
-                        <li key={requirement.key} className={isPassed ? 'is-valid' : 'is-invalid'}>
-                          <span className="req-dot" aria-hidden="true" />
-                          <span>{requirement.label}</span>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </aside>
+              {updateState.status === 'downloaded' && (
+                <button
+                  type="button"
+                  className="btn-primary"
+                  onClick={handleInstallUpdate}
+                >
+                  <CheckCircle size={15} />
+                  {t('settings.updates.installButton') || 'Installa e Riavvia'}
+                </button>
+              )}
+            </div>
+          </SettingRow>
 
-                <div className="password-form-panel">
-                  {passwordError && (
-                    <div style={{ 
-                      color: '#dc2626', 
-                      padding: '10px', 
-                      marginBottom: '10px',
-                      backgroundColor: '#fee2e2',
-                      borderRadius: '4px',
-                      fontSize: '14px'
-                    }}>
-                      {passwordError}
-                    </div>
-                  )}
-                  {passwordSuccess && (
-                    <div style={{ 
-                      color: '#10b981', 
-                      padding: '10px', 
-                      marginBottom: '10px',
-                      backgroundColor: '#d1fae5',
-                      borderRadius: '4px',
-                      fontSize: '14px'
-                    }}>
-                      {passwordSuccess}
-                    </div>
-                  )}
-                  <div className="form-group" style={{ marginBottom: '15px' }}>
-                    <label>{t('settings.password.current') || 'Password Attuale'}</label>
-                    <div style={{ position: 'relative', width: '100%' }}>
-                      <input
-                        type={showCurrentPassword ? "text" : "password"}
-                        value={currentPassword}
-                        onChange={(e) => setCurrentPassword(e.target.value)}
-                        placeholder={t('settings.password.currentPlaceholder')}
-                        style={{ width: '100%', padding: '10px 45px 10px 12px', borderRadius: '6px', border: '1px solid #ddd', fontSize: '14px', boxSizing: 'border-box' }}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowCurrentPassword(!showCurrentPassword)}
-                        style={{
-                          position: 'absolute',
-                          right: '12px',
-                          top: '50%',
-                          transform: 'translateY(-50%)',
-                          background: 'none',
-                          border: 'none',
-                          cursor: 'pointer',
-                          padding: '4px',
-                          display: 'flex',
-                          alignItems: 'center',
-                          color: '#6b7280',
-                          zIndex: 10
-                        }}
-                      >
-                        {showCurrentPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                      </button>
-                    </div>
-                  </div>
-                  <div className="form-group" style={{ marginBottom: '15px' }}>
-                    <label>{t('settings.password.new') || 'Nuova Password'}</label>
-                    <div style={{ position: 'relative', width: '100%' }}>
-                      <input
-                        type={showNewPassword ? "text" : "password"}
-                        value={newPassword}
-                        onChange={(e) => setNewPassword(e.target.value)}
-                        placeholder={t('settings.password.newPlaceholder')}
-                        style={{ width: '100%', padding: '10px 45px 10px 12px', borderRadius: '6px', border: '1px solid #ddd', fontSize: '14px', boxSizing: 'border-box' }}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowNewPassword(!showNewPassword)}
-                        style={{
-                          position: 'absolute',
-                          right: '12px',
-                          top: '50%',
-                          transform: 'translateY(-50%)',
-                          background: 'none',
-                          border: 'none',
-                          cursor: 'pointer',
-                          padding: '4px',
-                          display: 'flex',
-                          alignItems: 'center',
-                          color: '#6b7280',
-                          zIndex: 10
-                        }}
-                      >
-                        {showNewPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                      </button>
-                    </div>
-                  </div>
-                  <div className="form-group" style={{ marginBottom: '15px' }}>
-                    <label>{t('settings.password.confirm') || 'Conferma Password'}</label>
-                    <div style={{ position: 'relative', width: '100%' }}>
-                      <input
-                        type={showConfirmPassword ? "text" : "password"}
-                        value={confirmPassword}
-                        onChange={(e) => setConfirmPassword(e.target.value)}
-                        placeholder={t('settings.password.confirmPlaceholder')}
-                        style={{ width: '100%', padding: '10px 45px 10px 12px', borderRadius: '6px', border: '1px solid #ddd', fontSize: '14px', boxSizing: 'border-box' }}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                        style={{
-                          position: 'absolute',
-                          right: '12px',
-                          top: '50%',
-                          transform: 'translateY(-50%)',
-                          background: 'none',
-                          border: 'none',
-                          cursor: 'pointer',
-                          padding: '4px',
-                          display: 'flex',
-                          alignItems: 'center',
-                          color: '#6b7280',
-                          zIndex: 10
-                        }}
-                      >
-                        {showConfirmPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                      </button>
-                    </div>
-                  </div>
-                  <button 
-                    type="submit" 
-                    className="btn-primary" 
-                    style={{ 
-                      width: '100%',
-                      padding: '12px 20px',
-                      fontSize: '15px',
-                      fontWeight: '600',
-                      backgroundColor: 'var(--accent-success)',
-                      color: '#ffffff',
-                      border: 'none',
-                      borderRadius: '8px',
-                      cursor: 'pointer',
-                      transition: 'all 0.3s ease',
-                      boxShadow: 'var(--shadow)',
-                      marginTop: '5px'
-                    }}
-                    onMouseOver={(e) => e.target.style.filter = 'brightness(0.95)'}
-                    onMouseOut={(e) => e.target.style.filter = 'brightness(1)'}
-                  >
-                    {t('settings.savePassword') || 'Salva Nuova Password'}
-                  </button>
-                </div>
-              </div>
-            </form>
-          )}
-        </div>
-      </div>
-
-      {/* Sezione Pericolo - Solo per studenti */}
-      {userRole === 'student' && !isReadOnly && (
-        <div className="settings-danger-zone">
-          <h3 className="danger-title">{t('settings.danger')}</h3>
-          <p className="danger-description">{t('settings.danger.desc')}</p>
-          
-          <button className="btn-danger" onClick={handleResetProgress}>
-            {t('settings.reset')}
-          </button>
-        </div>
-      )}
-
-      {/* Informazioni App */}
-      <div className="settings-info">
-        <h3>{t('settings.info')}</h3>
-        <div className="info-item">
-          <span>{t('settings.version')}:</span>
-          <strong>Version {APP_VERSION}</strong>
-        </div>
-        <div className="info-item">
-          <span>{t('settings.plan')}:</span>
-          <strong>SEFRI 24 novembre 2017</strong>
-        </div>
-        <div className="info-item">
-          <span>{t('settings.profession')}:</span>
-          <strong>Operatore/Operatrice Informatico AFC</strong>
-        </div>
-        <div className="info-item">
-          <span>{t('settings.professionNumber')}:</span>
-          <strong>88605</strong>
-        </div>
+          <SettingRow title={t('settings.support')} description={t('settings.support.desc')}>
+            <a
+              className="btn-secondary"
+              href={FORMATRACK_URL}
+              onClick={handleExternalClick(FORMATRACK_URL)}
+              target="_blank"
+              rel="noreferrer"
+              title={FORMATRACK_LABEL}
+            >
+              <ExternalLink size={16} />
+              {t('settings.support.visitSite')}
+            </a>
+          </SettingRow>
+        </section>
       </div>
     </section>
   );

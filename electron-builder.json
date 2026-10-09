@@ -1,32 +1,62 @@
 {
-  "appId": "com.monitorformazione.app",
-  "productName": "Monitor avanzamento di formazione",
+  "extends": null,
+  "appId": "com.formatrack.app",
+  "productName": "FormaTrack",
   "directories": {
     "buildResources": "assets",
     "output": "dist"
+  },
+  "extraMetadata": {
+    "main": "main.js"
   },
   "files": [
     "build/**/*",
     "main.js",
     "preload.js",
     "package.json",
-    "!node_modules/**/*"
+    "node_modules/electron-updater/**/*",
+    "node_modules/electron-log/**/*",
+    "node_modules/builder-util-runtime/**/*",
+    "node_modules/semver/**/*",
+    "node_modules/fs-extra/**/*",
+    "node_modules/graceful-fs/**/*",
+    "node_modules/jsonfile/**/*",
+    "node_modules/universalify/**/*",
+    "node_modules/js-yaml/**/*",
+    "node_modules/lazy-val/**/*",
+    "node_modules/lodash.isequal/**/*",
+    "node_modules/ms/**/*",
+    "node_modules/debug/**/*"
   ],
   "asar": true,
+  "publish": [
+    {
+      "provider": "github",
+      "owner": "LoJaeggli09",
+      "repo": "formatrack",
+      "releaseType": "release"
+    }
+  ],
   "win": {
     "target": [
-      "nsis"
+      {
+        "target": "nsis",
+        "arch": ["x64"]
+      }
     ],
-    "icon": "assets/icon.ico",
-    "signAndEditExecutable": false
+    "icon": "icon/icon.ico",
+    "signAndEditExecutable": true,
+    "artifactName": "FormaTrack-${version}.${ext}"
   },
   "nsis": {
     "oneClick": false,
     "allowToChangeInstallationDirectory": true,
-    "allowElevation": false,
-    "installerIcon": "assets/icon.ico",
-    "uninstallerIcon": "assets/icon.ico",
+    "allowElevation": true,
+    "installerIcon": "icon/icon.ico",
+    "uninstallerIcon": "icon/icon.ico",
+
     "createDesktopShortcut": true,
-    "createStartMenuShortcut": true
+    "createStartMenuShortcut": true,
+    "deleteAppDataOnUninstall": true
   }
 }

@@ -44,121 +44,56 @@ const ForceChangePasswordModal = ({ user, language = 'it', onPasswordChanged }) 
     }
   };
 
-  const inputStyle = {
-    width: '100%',
-    padding: '10px 45px 10px 12px',
-    borderRadius: '6px',
-    border: '1px solid #ddd',
-    fontSize: '14px',
-    boxSizing: 'border-box',
-  };
-
-  const eyeButtonStyle = {
-    position: 'absolute',
-    right: '12px',
-    top: '50%',
-    transform: 'translateY(-50%)',
-    background: 'none',
-    border: 'none',
-    cursor: 'pointer',
-    padding: '4px',
-    display: 'flex',
-    alignItems: 'center',
-    color: '#6b7280',
-  };
-
   return (
-    <div style={{
-      position: 'fixed',
-      top: 0, left: 0, right: 0, bottom: 0,
-      backgroundColor: 'rgba(0, 0, 0, 0.6)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      zIndex: 9999,
-    }}>
-      <div style={{
-        backgroundColor: 'white',
-        borderRadius: '12px',
-        padding: '36px 32px',
-        maxWidth: '420px',
-        width: '90%',
-        boxShadow: '0 10px 40px rgba(0, 0, 0, 0.25)',
-      }}>
-        <h2 style={{ margin: '0 0 12px 0', color: '#1a3a52', fontSize: '20px' }}>
-          {t('changePassword.title')}
-        </h2>
-        <p style={{ margin: '0 0 24px 0', color: '#6b7280', lineHeight: '1.5', fontSize: '14px' }}>
-          {t('changePassword.message')}
-        </p>
+    <div className="modal-backdrop modal-backdrop--top">
+      <div className="modal-card modal-card--sm">
+        <div className="modal-header">
+          <h2>{t('changePassword.title')}</h2>
+        </div>
 
         <form onSubmit={handleSubmit}>
-          {error && (
-            <div style={{
-              backgroundColor: '#fee2e2',
-              color: '#dc2626',
-              padding: '10px 14px',
-              borderRadius: '6px',
-              marginBottom: '16px',
-              fontSize: '13px',
-            }}>
-              {error}
-            </div>
-          )}
+          <div className="modal-body">
+            <p>{t('changePassword.message')}</p>
 
-          <div style={{ marginBottom: '16px' }}>
-            <label style={{ display: 'block', marginBottom: '5px', fontSize: '14px', color: '#374151' }}>
-              {t('changePassword.newPassword')}
-            </label>
-            <div style={{ position: 'relative' }}>
-              <input
-                type={showNew ? 'text' : 'password'}
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-                style={inputStyle}
-                autoFocus
-              />
-              <button type="button" onClick={() => setShowNew(!showNew)} style={eyeButtonStyle}>
-                {showNew ? <EyeOff size={18} /> : <Eye size={18} />}
-              </button>
-            </div>
-          </div>
+            {error && <div className="login-error">{error}</div>}
 
-          <div style={{ marginBottom: '24px' }}>
-            <label style={{ display: 'block', marginBottom: '5px', fontSize: '14px', color: '#374151' }}>
-              {t('changePassword.confirmPassword')}
-            </label>
-            <div style={{ position: 'relative' }}>
-              <input
-                type={showConfirm ? 'text' : 'password'}
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                style={inputStyle}
-              />
-              <button type="button" onClick={() => setShowConfirm(!showConfirm)} style={eyeButtonStyle}>
-                {showConfirm ? <EyeOff size={18} /> : <Eye size={18} />}
-              </button>
+            <div className="form-group">
+              <label>{t('changePassword.newPassword')}</label>
+              <div className="password-input-wrapper">
+                <input
+                  type={showNew ? 'text' : 'password'}
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  className="password-input"
+                  autoFocus
+                />
+                <button type="button" className="password-toggle-button" onClick={() => setShowNew(!showNew)}>
+                  {showNew ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </div>
+            </div>
+
+            <div className="form-group">
+              <label>{t('changePassword.confirmPassword')}</label>
+              <div className="password-input-wrapper">
+                <input
+                  type={showConfirm ? 'text' : 'password'}
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  className="password-input"
+                />
+                <button type="button" className="password-toggle-button" onClick={() => setShowConfirm(!showConfirm)}>
+                  {showConfirm ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </div>
             </div>
           </div>
 
-          <button
-            type="submit"
-            disabled={loading}
-            style={{
-              width: '100%',
-              padding: '12px',
-              backgroundColor: loading ? '#93c5fd' : '#3b82f6',
-              color: 'white',
-              border: 'none',
-              borderRadius: '6px',
-              cursor: loading ? 'not-allowed' : 'pointer',
-              fontSize: '15px',
-              fontWeight: '600',
-              transition: 'background-color 0.2s',
-            }}
-          >
-            {loading ? '...' : t('changePassword.button')}
-          </button>
+          <div className="modal-footer">
+            <button type="submit" className="btn-primary modal-footer-full" disabled={loading}>
+              {loading ? '...' : t('changePassword.button')}
+            </button>
+          </div>
         </form>
       </div>
     </div>

@@ -1,16 +1,19 @@
 {
-  "name": "monitor-formazione",
-  "version": "1.2.49",
+  "name": "formatrack",
+  "version": "2.1.60",
   "author": "Elia Jaeggli",
-  "description": "App desktop per monitorare il percorso formativo degli apprendisti",
+  "description": "FormaTrack — Gestionale desktop per apprendisti: calendario, note, attività, prenotazioni e valutazioni",
   "main": "main.js",
   "homepage": "./",
   "scripts": {
     "react-start": "cross-env PORT=3003 react-scripts start",
-    "react-build": "react-scripts build && node -e \"require('fs').copyFileSync('main.js', 'build/electron.js')\"",
+    "react-build": "react-scripts build",
+    "test": "react-scripts test",
+    "test:ci": "cross-env CI=true react-scripts test --watchAll=false",
     "electron-start": "electron .",
     "start": "concurrently \"npm run react-start\" \"wait-on http://localhost:3003 \"",
-    "build": "npm run react-build && cross-env TEMP=C:\\Temp TMP=C:\\Temp electron-builder",
+    "build": "npm run react-build && node -e \"require('fs').mkdirSync('C:\\\\Temp',{recursive:true})\" && cross-env TEMP=C:\\Temp TMP=C:\\Temp electron-builder",
+    "build:publish": "npm run react-build && node -e \"require('fs').mkdirSync('C:\\\\Temp',{recursive:true})\" && cross-env TEMP=C:\\Temp TMP=C:\\Temp electron-builder --publish always",
     "version:bump": "node scripts/bump-version.js"
   },
   "dependencies": {
@@ -20,6 +23,8 @@
     "@mui/material": "^7.3.8",
     "@supabase/supabase-js": "^2.105.1",
     "bcryptjs": "^3.0.3",
+    "electron-log": "^5.4.3",
+    "electron-updater": "^6.8.3",
     "framer-motion": "^12.34.3",
     "jspdf": "^4.2.0",
     "jspdf-autotable": "^5.0.7",
