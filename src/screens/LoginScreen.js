@@ -40,7 +40,24 @@ const LoginScreen = ({ onLogin, language = 'it', onLanguageChange }) => {
     }
 
     // Autenticazione con database utenti
-    const user = await authenticateUser(normalizedUsername, normalizedPassword);
+    let user;
+    try {
+      user = await authenticateUser(normalizedUsername, normalizedPassword);
+    } catch (authError) {
+      // Troppi tentativi falliti: l'account è bloccato per qualche minuto.
+      // L'admin di un'area di lavoro viene mandato al supporto FormaTrack.
+      if (authError?.code === 'ACCOUNT_LOCKED') {
+        await writeAuditLog({
+          event: AUDIT_EVENTS.LOGIN_FAILED,
+          actorName: normalizedUsername,
+          details: { reason: 'account_locked' },
+        });
+        const messageKey = authError.contactSupport ? 'login.lockedAdmin' : 'login.locked';
+        setError(t(messageKey).replace('{minutes}', String(authError.minutesLeft)));
+        return;
+      }
+      throw authError;
+    }
 
     if (user) {
       onLogin(user);
@@ -116,7 +133,7 @@ const LoginScreen = ({ onLogin, language = 'it', onLanguageChange }) => {
           )}
 
           <div className="login-logo">
-            <img src="/LAD_icona_blu.png" alt="Logo" style={{ width: '150px', height: 'auto' }} />
+            <img src={`${process.env.PUBLIC_URL}/LAD_icona_blu.png`} alt="Logo" style={{ width: '150px', height: 'auto' }} />
           </div>
 
           <div className="login-header">

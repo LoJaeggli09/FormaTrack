@@ -220,7 +220,7 @@ function setupAutoUpdater() {
       const notif = new Notification({
         title: 'Aggiornamento disponibile',
         body: `Versione ${info.version} in download automatico...`,
-        icon: path.join(__dirname, 'assets', 'icon.ico'),
+        icon: path.join(__dirname, 'icon', 'icon.ico'),
       });
       notif.on('click', () => {
         if (mainWindow) {
@@ -261,7 +261,7 @@ function setupAutoUpdater() {
       const notif = new Notification({
         title: 'Aggiornamento pronto',
         body: `Versione ${info.version} pronta. Vai in Impostazioni per installare e riavviare.`,
-        icon: path.join(__dirname, 'assets', 'icon.ico'),
+        icon: path.join(__dirname, 'icon', 'icon.ico'),
       });
       notif.on('click', () => {
         if (mainWindow) {
@@ -424,7 +424,7 @@ ipcMain.on('show-notification', (_event, { title, body }) => {
   const notif = new Notification({
     title: title || 'FormaTrack',
     body: body || '',
-    ...(process.platform === 'win32' && { icon: path.join(__dirname, 'assets', 'icon.ico') }),
+    ...(process.platform === 'win32' && { icon: path.join(__dirname, 'icon', 'icon.ico') }),
   });
   notif.on('click', () => {
     if (mainWindow) {

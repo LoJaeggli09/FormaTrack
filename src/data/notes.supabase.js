@@ -1,6 +1,9 @@
 import { supabase } from '../supabaseClient';
 import { readThroughCache } from './offlineCache';
 import { withOptionalColumns } from './schemaFallback';
+import { writeOrQueue, registerExecutor, overlayPending } from './offlineQueue';
+import { logDataChange, AUDIT_EVENTS } from './auditLog.supabase';
+import { SYNC_ENTITY } from '../utils/syncQueue';
 
 /** Categorie di nota (chiave i18n: `notes.category.<id>`). */
 export const NOTE_CATEGORIES = ['general', 'positive', 'warning', 'meeting', 'goal'];
@@ -26,8 +29,9 @@ const normalizeNote = (n) => ({
   updatedAt: n.updated_at,
 });
 
-// Leggi tutte le note di un apprendista
-export const getNotesForStudent = async (studentId) =>
+const byCreatedDesc = (a, b) => String(b.createdAt).localeCompare(String(a.createdAt));
+
+const fetchNotesForStudent = async (studentId) =>
   readThroughCache(`notes:${studentId}`, async () => {
     const { data, error } = await supabase
       .from('notes')
@@ -38,8 +42,13 @@ export const getNotesForStudent = async (studentId) =>
     return data.map(normalizeNote);
   });
 
-/** Note di più apprendisti insieme (ricerca globale multi-apprendista). */
-export const getNotesForStudents = async (studentIds) => {
+// Leggi tutte le note di un apprendista (con le modifiche ancora in coda, se offline)
+export const getNotesForStudent = async (studentId) => {
+  const rows = await fetchNotesForStudent(studentId);
+  return overlayPending(SYNC_ENTITY.NOTE, rows, { studentIds: [studentId], sort: byCreatedDesc });
+};
+
+const fetchNotesForStudents = async (studentIds) => {
   if (!studentIds || studentIds.length === 0) return [];
   const cacheKey = `notes:many:${[...studentIds].sort().join(',')}`;
   return readThroughCache(cacheKey, async () => {
@@ -53,8 +62,14 @@ export const getNotesForStudents = async (studentIds) => {
   });
 };
 
+/** Note di più apprendisti insieme (ricerca globale multi-apprendista). */
+export const getNotesForStudents = async (studentIds) => {
+  const rows = await fetchNotesForStudents(studentIds);
+  return overlayPending(SYNC_ENTITY.NOTE, rows, { studentIds, sort: byCreatedDesc });
+};
+
 // Aggiungi una nota
-export const addNote = async (studentId, content, authorId = null, authorName = null, options = {}) => {
+const addNoteOnline = async (studentId, content, authorId = null, authorName = null, options = {}) => {
   const row = {
     student_id: studentId,
     content,
@@ -64,20 +79,54 @@ export const addNote = async (studentId, content, authorId = null, authorName = 
     visibility: options.visibility || NOTE_VISIBILITY.SHARED,
   };
 
-  return withOptionalColumns(row, STRUCTURED_COLUMNS, async (payload) => {
+  const created = await withOptionalColumns(row, STRUCTURED_COLUMNS, async (payload) => {
     const { data, error } = await supabase.from('notes').insert([payload]).select().single();
     if (error) throw error;
     return normalizeNote(data);
   });
+
+  // Nel log solo categoria e visibilità: il testo della nota può essere privato.
+  await logDataChange({
+    event: AUDIT_EVENTS.NOTE_CREATED,
+    entity: 'note',
+    entityId: created.id,
+    studentId,
+    details: { category: created.category, visibility: created.visibility },
+  });
+  return created;
 };
 
+export const addNote = async (studentId, content, authorId = null, authorName = null, options = {}) => {
+  const now = new Date().toISOString();
+  return writeOrQueue({
+    entity: SYNC_ENTITY.NOTE,
+    action: 'create',
+    studentId,
+    args: [studentId, content, authorId, authorName, options],
+    row: {
+      studentId,
+      content,
+      category: options.category || 'general',
+      visibility: options.visibility || NOTE_VISIBILITY.SHARED,
+      readAt: null,
+      readBy: null,
+      authorId,
+      authorName: authorName || '',
+      createdAt: now,
+      updatedAt: now,
+    },
+    run: () => addNoteOnline(studentId, content, authorId, authorName, options),
+  });
+};
+registerExecutor('note:create', (args) => addNoteOnline(...args));
+
 // Aggiorna una nota (contenuto e, se passati, categoria/visibilità)
-export const updateNote = async (noteId, content, options = {}) => {
+const updateNoteOnline = async (noteId, content, options = {}) => {
   const row = { content, updated_at: new Date().toISOString() };
   if (options.category !== undefined) row.category = options.category;
   if (options.visibility !== undefined) row.visibility = options.visibility;
 
-  return withOptionalColumns(row, STRUCTURED_COLUMNS, async (payload) => {
+  const updated = await withOptionalColumns(row, STRUCTURED_COLUMNS, async (payload) => {
     const { data, error } = await supabase
       .from('notes')
       .update(payload)
@@ -86,7 +135,32 @@ export const updateNote = async (noteId, content, options = {}) => {
     if (error) throw error;
     return normalizeNote(data);
   });
+
+  await logDataChange({
+    event: AUDIT_EVENTS.NOTE_UPDATED,
+    entity: 'note',
+    entityId: updated.id,
+    studentId: updated.studentId,
+    details: { category: updated.category, visibility: updated.visibility },
+  });
+  return updated;
 };
+
+export const updateNote = async (noteId, content, options = {}) =>
+  writeOrQueue({
+    entity: SYNC_ENTITY.NOTE,
+    action: 'update',
+    targetId: noteId,
+    args: [noteId, content, options],
+    patch: {
+      content,
+      updatedAt: new Date().toISOString(),
+      ...(options.category !== undefined ? { category: options.category } : {}),
+      ...(options.visibility !== undefined ? { visibility: options.visibility } : {}),
+    },
+    run: () => updateNoteOnline(noteId, content, options),
+  });
+registerExecutor('note:update', (args) => updateNoteOnline(...args));
 
 /**
  * Segna una nota come letta dal destinatario.
@@ -109,8 +183,31 @@ export const markNoteRead = async (noteId, readerId = null) => {
 };
 
 // Elimina una nota
-export const deleteNote = async (noteId) => {
-  const { error } = await supabase.from('notes').delete().eq('id', noteId);
+const deleteNoteOnline = async (noteId) => {
+  const { data, error } = await supabase
+    .from('notes')
+    .delete()
+    .eq('id', noteId)
+    .select('student_id, category, visibility');
   if (error) throw error;
+
+  const removed = Array.isArray(data) ? data[0] : null;
+  await logDataChange({
+    event: AUDIT_EVENTS.NOTE_DELETED,
+    entity: 'note',
+    entityId: noteId,
+    studentId: removed?.student_id ?? null,
+    details: { category: removed?.category ?? null, visibility: removed?.visibility ?? null },
+  });
   return true;
 };
+
+export const deleteNote = async (noteId) =>
+  writeOrQueue({
+    entity: SYNC_ENTITY.NOTE,
+    action: 'delete',
+    targetId: noteId,
+    args: [noteId],
+    run: () => deleteNoteOnline(noteId),
+  });
+registerExecutor('note:delete', (args) => deleteNoteOnline(...args));

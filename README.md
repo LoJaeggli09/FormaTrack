@@ -35,9 +35,12 @@ Applicazione desktop sviluppata con **Electron + React** per la gestione operati
 - **Dati**: statistiche aggregate su tutti gli apprendisti visibili (formatore/admin/ispettore), filtrabili per periodo (mese, trimestre, anno, intervallo personalizzato) — ore totali e per apprendista/tipo/mese, ore di affiancamento per formatore, sedi con più interventi, durata media, giorni di assenza e tasso di presenza.
 - **Rapporto di formazione periodico**: PDF firmabile con riepilogo del periodo (attività, ore, assenze, medie per materia), commento del formatore e riquadro firme.
 - **Promemoria**: campanella in alto a destra, accanto al logo (con il numero dei promemoria aperti), contatore in rosso sulle voci di menu che hanno qualcosa in sospeso e notifiche di sistema per prenotazioni di oggi/domani, attività da validare o respinte, apprendisti fermi da oltre 10 giorni, valutazioni mancanti, note non lette e assenze senza giustificativo. Per l'`app_admin` c'è anche il promemoria "Aree di lavoro eliminabili", che compare quando un'area è archiviata da almeno 30 giorni: serve solo ad avvisare e porta all'archivio, **non elimina nulla** (l'eliminazione si fa dall'archivio, con conferma). Disattivabili dalle impostazioni.
-- **Gestione Utenti** (admin): organizzata in 4 tab — Utenti (ricerca/filtro/CRUD/promozione anno), Assegnazioni Bulk (assegna formatore a più apprendisti), Archivio (apprendisti archiviati, ripristinabili), Log Audit (storico azioni).
+- **Gestione Utenti** (admin): organizzata in 4 tab — Utenti (ricerca/filtro/CRUD/promozione anno, account bloccati con pulsante *Sblocca*), Assegnazioni Bulk (assegna formatore a più apprendisti), Archivio (apprendisti archiviati, ripristinabili), Log Audit (storico azioni, filtrabile per famiglia: accessi e password / attività, note e voti / utenti e aree di lavoro).
+- **Audit log completo**: oltre a login e gestione utenti, il log registra creazione, modifica ed eliminazione di **attività, note e valutazioni** (e i cambi di stato/validazione delle attività), con chi l'ha fatto, su quale apprendista e un dettaglio breve (data, tipo, materia e voto…). Per le note si registrano solo categoria e visibilità, **mai il testo**. Le azioni fatte offline riportano anche il momento in cui sono state fatte davvero ("fatta offline il …"). Scrivere nel log non blocca mai l'operazione: se il log fallisce, l'attività/nota/voto si salva lo stesso. Eventi in `AUDIT_EVENTS` (`data/auditLog.supabase.js`), descrizioni in `utils/auditDescribe.js`.
+- **Lavoro offline con coda di sincronizzazione**: senza rete l'app continua a funzionare sulla copia locale e **si può scrivere** — attività, note, valutazioni, calendario e assenze. Le modifiche restano in coda su questo dispositivo (una coda per utente), compaiono subito nelle liste con l'etichetta *In attesa di invio* e partono in ordine appena torna la connessione (all'evento `online`, all'avvio e ogni 30 secondi finché ce ne sono). Il banner in alto dice cosa succede: offline, invio in corso, oppure — se il server rifiuta qualcosa (ad esempio una riga eliminata da un altro) — *Alcune modifiche non sono state accettate*, con **Riprova** e **Scarta**. Una riga creata offline ed eliminata prima dell'invio non arriva mai al server. Restano **solo online**: cambio di stato/validazione delle attività, allegati, cambio password e gestione utenti/aree di lavoro (i pulsanti sono disattivati offline).
+- **Blocco del login e scadenza password**: dopo 5 password sbagliate (`MAX_FAILED_ATTEMPTS`) l'account si blocca per 15 minuti (`LOCK_MINUTES`) e l'evento `account_locked` finisce nel log. Un admin può togliere subito il blocco con *Sblocca* in Gestione Utenti. L'**admin di un'area di lavoro** bloccato vede un messaggio che lo invita a scrivere al supporto di FormaTrack (contatti su formatrack.ch); l'**`app_admin` non si blocca mai**. La password scade dopo 90 giorni (`PASSWORD_MAX_AGE_DAYS`): al primo accesso dopo la scadenza va cambiata (non si può riusare quella vecchia) e, nei 7 giorni prima, un promemoria avvisa. Regole in `utils/loginPolicy.js`.
 - **Aree di lavoro** (multi-tenant, solo `app_admin`): creazione area di lavoro con relativo admin, selezione area di lavoro attiva.
-- **Archivio delle aree di lavoro** (solo `app_admin`): un'area si può archiviare (pulsante *Archivia* sulla sua scheda) e ripristinare. **Un'area archiviata continua a funzionare normalmente** — accessi, utenti e dati non cambiano —, esce solo dall'elenco attivo e finisce nell'*Archivio aree di lavoro*, dove si vede da quando è archiviata e da quando si può eliminare. L'eliminazione definitiva è possibile **solo dopo 30 giorni in archivio** (`ARCHIVE_RETENTION_DAYS` in `utils/workspaceArchive.js`), solo da quella pagina e solo dopo una conferma scritta (si digita il nome dell'area): elimina l'area, i suoi utenti e tutti i loro dati, file allegati compresi. Ripristinare un'area azzera il conteggio dei 30 giorni. Il limite è applicato anche dal database, non solo dall'interfaccia.
+- **Archivio delle aree di lavoro** (solo `app_admin`): un'area si può archiviare (pulsante *Archivia* sulla sua scheda) e ripristinare. **Un'area archiviata continua a funzionare normalmente** — accessi, utenti e dati non cambiano —, esce solo dall'elenco attivo e finisce nell'*Archivio aree di lavoro*, dove si vede da quando è archiviata e da quando si può eliminare. L'eliminazione definitiva è possibile **solo dopo 30 giorni in archivio** (`ARCHIVE_RETENTION_DAYS` in `utils/workspaceArchive.js`), solo da quella pagina e solo dopo una conferma scritta (si digita il nome dell'area): elimina l'area, i suoi utenti e tutti i loro dati, file allegati compresi. Ripristinare un'area azzera il conteggio dei 30 giorni. Il limite è applicato anche dal database (vedi `supabase-workspaces-archive.sql`), non solo dall'interfaccia.
 - **Impostazioni** organizzate in quattro gruppi di righe (titolo e spiegazione a sinistra, controllo a destra): *Interfaccia* (lingua, layout compatto, riduci animazioni), *Avvio e navigazione* (vista iniziale, ricorda l'ultimo apprendista, apprendista selezionato), *Promemoria e sicurezza* (promemoria, disconnessione automatica, cambio password) e *Applicazione* (versione, aggiornamenti, supporto).
 - **Cambio password** con checklist requisiti in tempo reale (10–20 caratteri, maiuscole, minuscole, numero, simbolo speciale `! $ # _`).
 - **Accessibilità**: navigazione da tastiera, focus trap nel menu, annunci screen reader.
@@ -55,7 +58,6 @@ Applicazione desktop sviluppata con **Electron + React** per la gestione operati
 | React | 18 | UI renderer |
 | Electron | 40 | Desktop wrapper |
 | Material UI | 7 | Componenti UI (switch, select, snackbar) |
-| Framer Motion | 12 | Non più usato: il linguaggio visivo esclude le animazioni di entrata e di pagina |
 | Lucide React | 0.294 | Icone |
 | Recharts | 3 | Grafici a barre (sezione Dati, valutazioni per apprendista) |
 | Supabase JS | 2 | Database cloud + realtime |
@@ -114,18 +116,18 @@ Esegue in sequenza:
 ### Output
 
 Genera:
-- `FormaTrack-2.1.60.exe` — installer NSIS per Windows
-- `FormaTrack-2.1.60.exe.blockmap` — per aggiornamenti incrementali
+- `FormaTrack-2.1.62.exe` — installer NSIS per Windows
+- `FormaTrack-2.1.62.exe.blockmap` — per aggiornamenti incrementali
 - `latest.yml` — metadata per auto-updater
 
 ### Pubblicazione su GitHub Release
 
 1. Vai a [GitHub Releases](https://github.com/LoJaeggli09/formatrack/releases)
-2. Crea una nuova release con tag `v2.1.60`
+2. Crea una nuova release con tag `v2.1.62`
 3. Carica questi file:
-   - `FormaTrack-2.1.60.exe`
+   - `FormaTrack-2.1.62.exe`
    - `latest.yml`
-   - `FormaTrack-2.1.60.exe.blockmap` (opzionale, per update più veloci)
+   - `FormaTrack-2.1.62.exe.blockmap` (opzionale, per update più veloci)
 
 L'app usa `electron-updater` per scaricare automaticamente l'installer dal release più recente.
 
@@ -133,7 +135,7 @@ L'app usa `electron-updater` per scaricare automaticamente l'installer dal relea
 
 ## Versioning
 
-Versione corrente: **`2.1.60`**
+Versione corrente: **`2.1.62`**
 
 Regola incremento (script `version:bump`):
 - patch standard: `1.1.0 → 1.1.1`
@@ -183,6 +185,8 @@ Aggiorna automaticamente `package.json` e `src/appVersion.js`. Lo script cerca a
 │   │   ├── ActivityFormFields.js        # Campi di inserimento attività/prenotazione (essenziale + dettagli)
 │   │   ├── AttachmentsPanel.js          # Allegati di un'attività o nota
 │   │   ├── NotificationsPanel.js        # Campanella promemoria
+│   │   ├── OfflineBanner.js             # Banner: offline / invio in corso / modifiche rifiutate (Riprova, Scarta)
+│   │   ├── PendingBadge.js              # Etichetta "In attesa di invio" sulle righe in coda
 │   │   ├── PeriodFilter.js              # Selettore di periodo riutilizzabile
 │   │   ├── PeriodReportDialog.js        # Rapporto di formazione periodico
 │   │   ├── GradingSection.js            # Valutazioni (materia libera + voto + nota)
@@ -200,19 +204,30 @@ Aggiorna automaticamente `package.json` e `src/appVersion.js`. Lo script cerca a
 │   │   ├── LoginScreen.js               # Autenticazione + creazione area di lavoro
 │   │   └── DashboardScreen.js           # Orchestratore principale (routing interno)
 │   ├── data/
-│   │   ├── users.supabase.js            # CRUD utenti, auth bcrypt, flag password
+│   │   ├── users.supabase.js            # CRUD utenti, auth bcrypt, flag password, blocco login, scadenza password
+│   │   ├── loginAttempts.js             # Contatore dei tentativi sul dispositivo (se mancano le colonne nel DB)
 │   │   ├── workspaces.supabase.js       # CRUD aree di lavoro
-│   │   ├── calendar.supabase.js         # CRUD eventi calendario
-│   │   ├── notes.supabase.js            # CRUD note
-│   │   ├── activities.supabase.js       # CRUD attività/prenotazioni + query aggregate multi-apprendista
-│   │   ├── grades.supabase.js           # CRUD valutazioni + query aggregate multi-apprendista
-│   │   └── auditLog.supabase.js         # Scrittura/lettura log audit
+│   │   ├── calendar.supabase.js         # CRUD eventi calendario (scrive tramite la coda offline)
+│   │   ├── notes.supabase.js            # CRUD note (coda offline + audit)
+│   │   ├── activities.supabase.js       # CRUD attività/prenotazioni + query aggregate (coda offline + audit)
+│   │   ├── grades.supabase.js           # CRUD valutazioni + query aggregate (coda offline + audit)
+│   │   ├── absences.supabase.js         # CRUD assenze (coda offline)
+│   │   ├── attachments.supabase.js      # Allegati su Supabase Storage (solo online)
+│   │   ├── offlineCache.js              # Cache delle letture per lavorare senza rete
+│   │   ├── offlineQueue.js              # Coda di sincronizzazione: scrittura/accodamento, invio, riprova/scarta
+│   │   ├── syncContext.js               # Segna le operazioni rieseguite dalla coda (l'audit annota quando erano state fatte)
+│   │   └── auditLog.supabase.js         # Scrittura/lettura log audit, eventi e famiglie del filtro
 │   ├── hooks/
 │   │   ├── accessibility.js             # Tastiera, screen reader
+│   │   ├── useOfflineState.js           # Stato online/offline e data dell'ultimo aggiornamento
+│   │   ├── useSyncQueue.js              # Invio della coda (avvio, ritorno rete, ogni 30 s) e ricarica delle sezioni
 │   │   ├── useReminders.js              # Promemoria: caricamento, intervalli, notifiche native
 │   │   └── inactivityTimeout.js         # Logout automatico per inattività
 │   └── utils/
 │       ├── logger.js                    # Logging centralizzato (console + IPC + toast)
+│       ├── syncQueue.js                 # Regole della coda offline (pure, testate): id provvisori, accorpamenti, sovrapposizione
+│       ├── loginPolicy.js               # Regole di blocco login e scadenza password (pure, testate)
+│       ├── auditDescribe.js             # Dettaglio leggibile di una riga del log audit e famiglie di eventi
 │       ├── reminders.js                 # Regole dei promemoria (pure, testate)
 │       ├── dateRange.js                 # Preset di periodo condivisi
 │       ├── recurrence.js                # Espansione degli eventi ricorrenti
@@ -231,9 +246,21 @@ Aggiorna automaticamente `package.json` e `src/appVersion.js`. Lo script cerca a
 
 ## Database Supabase
 
-Lo schema base (`users`, `grades`, `audit_log`) proviene dalla versione originale dell'app; le tabelle e colonne aggiunte dalla v2.0 in poi sono descritte qui sotto. Gli script SQL usati per creare e aggiornare lo schema non fanno parte del repository: vanno eseguiti direttamente nell'SQL Editor di Supabase.
+Lo schema base (`users`, `grades`, `audit_log`) proviene dalla versione originale dell'app. Le modifiche successive sono fatte con script SQL (`supabase-*.sql`) che **non sono nel repository**: si conservano a parte, con questi nomi (sono gli stessi citati nei messaggi dell'app). Eseguirli in ordine nell'SQL Editor di Supabase su un progetto nuovo o non ancora aggiornato:
 
-> Le funzioni della v2.1 (validazione attività, categorie note, ricorrenze, Assenze, Allegati, archivio aree di lavoro) richiedono le relative colonne e tabelle. Finché mancano, `src/data/schemaFallback.js` le riconosce e fa degradare l'app alle funzioni della v2.0 invece di rompersi. Dopo ogni modifica allo schema: Supabase → Settings → API → **Reload schema**.
+1. `supabase-workspaces-policies.sql` — tabella `workspaces`
+2. `supabase-calendar-notes-activities.sql` — tabelle `calendar_events`, `notes`, `activities`
+3. `supabase-activities-extra-fields.sql` — colonne `activity_type`, `start_time`, `duration_minutes`, `site`, `ticket` su `activities`
+4. `supabase-activities-trainer-fields.sql` — colonne `trainer_time`, `apprentice_count` su `activities`
+5. `supabase-activities-validation.sql` — colonne `status`, `submitted_at`, `validated_by`, `validated_by_name`, `validated_at`, `rejection_reason` su `activities`
+6. `supabase-notes-structured.sql` — colonne `category`, `visibility`, `read_at`, `read_by` su `notes`
+7. `supabase-calendar-recurrence.sql` — colonne `recurrence`, `recurrence_end` su `calendar_events`
+8. `supabase-absences.sql` — tabella `absences`
+9. `supabase-attachments.sql` — tabella `attachments` + bucket privato `attachments` su Supabase Storage
+10. `supabase-workspaces-archive.sql` — colonna `archived_at` su `workspaces`, trigger che impedisce di eliminare un'area archiviata da meno di 30 giorni e funzione `delete_archived_workspace` (eliminazione atomica di area, utenti e dati)
+11. `supabase-login-policy.sql` — colonne `failed_login_attempts`, `locked_until`, `password_changed_at` su `users` (blocco del login e scadenza password, vedi sotto)
+
+> Gli script 5–11 sono opzionali finché non servono (l'app avvisa con il nome dello script da eseguire): `src/data/schemaFallback.js` riconosce colonne e tabelle mancanti e fa degradare l'app alle funzioni della v2.0 (niente validazione, niente categorie note, niente ricorrenze, sezioni Assenze e Allegati vuote, nessun archivio aree di lavoro: archiviare ed eliminare rispondono con un messaggio che chiede di eseguire lo script) invece di rompersi. Senza lo script 11 il blocco del login funziona lo stesso, ma con un contatore **sul singolo dispositivo** e la password non scade. Dopo ogni script: Supabase → Settings → API → **Reload schema**.
 
 ### Tabella `workspaces`
 
@@ -255,6 +282,9 @@ Lo schema base (`users`, `grades`, `audit_log`) proviene dalla versione original
 | `ruolo` | `text` | `student` / `trainer` / `inspector` / `admin` / `app_admin` |
 | `password_hash` | `text` | Hash bcrypt |
 | `must_change_password` | `boolean` | `true` = forzato cambio al prossimo login |
+| `failed_login_attempts` | `int4` | Password sbagliate di fila (v2.1, azzerato da un accesso riuscito o dallo sblocco) |
+| `locked_until` | `timestamptz` | Fino a quando l'accesso è bloccato; nullo = non bloccato |
+| `password_changed_at` | `timestamptz` | Ultimo cambio password: da qui partono i 90 giorni. Se manca, parte dal primo accesso dopo l'aggiornamento |
 | `trainer_id` / `inspector_id` | `int8` FK | Assegnazioni (solo apprendisti) |
 | `workspace_id` | `int8` FK | Area di lavoro di appartenenza |
 | `numero_studente` | `text` | |
@@ -262,6 +292,14 @@ Lo schema base (`users`, `grades`, `audit_log`) proviene dalla versione original
 | `data_inizio_apprendistato` / `data_fine_apprendistato` | `date` | |
 | `archiviato` | `boolean` | Apprendista archiviato |
 | `stato` | `text` | |
+
+Contenuto di `supabase-login-policy.sql` (da eseguire una volta nell'SQL Editor):
+
+```sql
+alter table users add column if not exists failed_login_attempts integer not null default 0;
+alter table users add column if not exists locked_until timestamptz;
+alter table users add column if not exists password_changed_at timestamptz;
+```
 
 ### Tabella `activities` (registro attività + prenotazioni)
 
@@ -327,11 +365,15 @@ Non usa React Router. La vista è gestita con stato:
 ```
 LoginScreen
   → authenticateUser (users.supabase.js)
-      → verifica bcrypt
+      → account bloccato? (locked_until, salvo l'app_admin) → errore ACCOUNT_LOCKED
+            (l'admin di un'area di lavoro riceve il rinvio al supporto FormaTrack)
+      → verifica bcrypt; password sbagliata → contatore +1, al 5° blocco di 15 minuti + log
+      → accesso riuscito → contatori azzerati
       → migrazione trasparente password plain → bcrypt
       → controlla must_change_password (DB) o password === 'Abc123!'
+      → password più vecchia di 90 giorni → passwordExpired + log password_expired
   → App.js: handleLogin
-      → mustChangePassword? → ForceChangePasswordModal (blocca accesso)
+      → mustChangePassword o passwordExpired? → ForceChangePasswordModal (blocca accesso)
       → altrimenti → DashboardScreen + salva sessione in localStorage
 ```
 
@@ -360,7 +402,8 @@ Hardening Electron già applicato in `main.js`: `contextIsolation: true`, `nodeI
 
 Resta da sistemare prima di un deploy pubblico:
 - Le policy RLS delle tabelle (`calendar_events`, `notes`, `activities`, `absences`, `attachments`, `workspaces`) sono permissive (`using (true)`) per compatibilità con l'autenticazione custom: chiunque abbia la anon key legge tutto. Da restringere per `workspace_id` integrando Supabase Auth.
-- Nessun blocco dopo N tentativi di login falliti (l'evento `login_failed` viene solo registrato nell'audit log).
+- Il blocco dopo i tentativi falliti e la scadenza della password sono applicati **dal client**: chi usa direttamente la anon key può provare password senza passare dall'app. Il contatore sta sull'account (colonne `users`), quindi vale su ogni dispositivo; per essere un vero limite serve spostare la verifica lato server (Supabase Auth o una funzione RPC). Altre scelte: i nomi utente inesistenti si bloccano come quelli reali (non si rivela chi esiste), ma un blocco su un'**admin di area di lavoro** mostra il rinvio al supporto, quindi lascia intuire che quel nome è un admin; l'`app_admin` non si blocca mai, quindi per lui il limite ai tentativi non esiste.
+- La coda offline vive in `localStorage` (`formatrack.syncQueue`, una per utente) e **sopravvive al logout**, così le modifiche non si perdono: su un computer condiviso restano leggibili da chi apre gli strumenti del browser/Electron finché non vengono inviate. Per le note la coda contiene il testo.
 - Il bucket `attachments` è privato e si legge via signed URL, ma le policy Storage sono anch'esse permissive.
 
 ---
@@ -397,7 +440,7 @@ solo per lo stato. Font: Manrope (titoli, numeri, etichette, pulsanti) e Source 
 
 | Tipo | Dove |
 |---|---|
-| Nuovo campo su un'attività | `src/data/activities.supabase.js` (normalize + CRUD) + `ActivitiesSection.js` / `BookingSection.js` / `CalendarSection.js` (UI) + `ALTER TABLE` sul database Supabase |
+| Nuovo campo su un'attività | `src/data/activities.supabase.js` (normalize + CRUD) + `ActivitiesSection.js` / `BookingSection.js` / `CalendarSection.js` (UI) + script SQL `ALTER TABLE` |
 | Nuova sezione dashboard | Componente in `src/components/` + voce in `SideMenu.js` + switch in `DashboardScreen.js` |
 | Nuove traduzioni | `src/i18n.js` (tutte e 4 le lingue) |
 | Nuova colonna tabella `users` | Aggiornare `normalizeUser` e `denormalizeUser` in `users.supabase.js` |
@@ -406,6 +449,9 @@ solo per lo stato. Font: Manrope (titoli, numeri, etichette, pulsanti) e Source 
 | Nuova aggregazione su ore/attività | `src/utils/activityStats.js`, così Dati e rapporto PDF restano allineati |
 | Nuovo preset di periodo | `src/utils/dateRange.js` (`PERIOD_PRESETS`) + chiave i18n `period.*` |
 | Nuova colonna su una tabella esistente | Script `ALTER TABLE` + `normalize*` nel modulo `src/data/` + elenco colonne opzionali passato a `withOptionalColumns` |
+| Nuova scrittura che deve funzionare offline | Separare la versione online (`xxxOnline`), avvolgerla con `writeOrQueue` e registrarla con `registerExecutor('entità:azione', …)` (esempio in `notes.supabase.js`); le letture della lista passano da `overlayPending`. La sezione ricarica con `useOnSynced` e mostra `PendingBadge`; le azioni che richiedono la rete si disattivano con `isOffline` / `row._pending` |
+| Nuovo evento da registrare nel log audit | `AUDIT_EVENTS` + famiglia in `AUDIT_GROUPS` (`auditLog.supabase.js`), etichetta e dettaglio in `ManageSection.js` / `utils/auditDescribe.js`, chiavi i18n `manage.audit*`. Nei dettagli solo riferimenti brevi, mai testi liberi |
+| Cambiare soglie di blocco o scadenza password | `src/utils/loginPolicy.js` (`MAX_FAILED_ATTEMPTS`, `LOCK_MINUTES`, `PASSWORD_MAX_AGE_DAYS`, `PASSWORD_WARNING_DAYS`) |
 
 ### Convenzioni
 
@@ -415,6 +461,8 @@ solo per lo stato. Font: Manrope (titoli, numeri, etichette, pulsanti) e Source 
 - Prenotazioni e attività condividono la stessa tabella `activities`: una riga è una "prenotazione" solo se `activity_date` è nel futuro (calcolato lato client, nessun flag dedicato). Il flusso di validazione si applica solo alle righe non future.
 - Gli eventi ricorrenti stanno nel database come una riga sola (la prima occorrenza): le ripetizioni sono generate a runtime da `src/utils/recurrence.js`, quindi modificare o cancellare una serie resta un'operazione su una riga.
 - La logica pura (promemoria, periodi, ricorrenze, statistiche, conteggio assenze) va tenuta fuori dai componenti e coperta da test: `npm run test:ci`.
+- Le scritture su attività, note, valutazioni, calendario e assenze passano sempre da `writeOrQueue` (`src/data/offlineQueue.js`): non chiamare Supabase direttamente dai componenti, altrimenti offline la modifica va persa. Gli id provvisori (`tmp_…`) esistono solo finché la creazione non è arrivata al server: una modifica su una riga con id provvisorio va sempre in coda.
+- Ogni scrittura su attività, note e voti registra un evento nel log (`logDataChange`); un errore del log non deve mai far fallire l'operazione.
 - Aggiornare questo README quando cambia: flusso login, schema DB, struttura file.
 
 ---
@@ -425,24 +473,26 @@ solo per lo stato. Font: Manrope (titoli, numeri, etichette, pulsanti) e Source 
 |---|---|
 | Schermata bianca in Electron | Verificare che React dev server sia attivo su porta `3003` |
 | Build non parte | Controllare dipendenze e `npm run react-build` |
-| "Could not find column ... in the schema cache" salvando un'attività | Aggiungere la colonna mancante su `activities` (vedi schema sotto *Database Supabase*), poi Supabase → Settings → API → Reload schema |
-| Archiviare o eliminare un'area di lavoro mostra "Esegui lo script..." | Manca la colonna `archived_at` su `workspaces` (con trigger e funzione `delete_archived_workspace`); aggiungerla, poi **Reload schema** |
-| Le sezioni Assenze/Allegati restano vuote | Mancano le tabelle `absences` / `attachments` (e il bucket Storage `attachments`); finché mancano, l'app le mostra vuote senza errori (vedi `schemaFallback.js`) |
-| I pulsanti Valida/Respingi non fanno nulla | Mancano le colonne di validazione su `activities`: l'app avvisa con "Esegui lo script..." |
-| Categoria/visibilità delle note non si salvano | Mancano le colonne `category`/`visibility`/`read_at`/`read_by` su `notes`: la nota viene salvata lo stesso, ma senza quei campi |
+| "Could not find column ... in the schema cache" salvando un'attività | Eseguire gli script SQL in `supabase-activities-*.sql` mancanti, poi Supabase → Settings → API → Reload schema |
+| Archiviare o eliminare un'area di lavoro mostra "Esegui lo script supabase-workspaces-archive.sql" | Eseguire `supabase-workspaces-archive.sql` (poi **Reload schema**) |
+| Le sezioni Assenze/Allegati restano vuote | Eseguire `supabase-absences.sql` e `supabase-attachments.sql`; finché mancano, l'app le mostra vuote senza errori (vedi `schemaFallback.js`) |
+| I pulsanti Valida/Respingi non fanno nulla | Manca `supabase-activities-validation.sql`: l'app avvisa con "Esegui lo script..." |
+| Categoria/visibilità delle note non si salvano | Manca `supabase-notes-structured.sql`: la nota viene salvata lo stesso, ma senza quei campi |
 | Le notifiche di sistema non compaiono | Le notifiche native esistono solo nella build Electron e vanno abilitate per l'app in Windows; il pannello promemoria funziona comunque |
 | Dati incoerenti dopo test | Pulire `localStorage` del profilo test |
 | Traduzioni mancanti | Aggiungere chiave in `i18n.js` per tutte le lingue |
 | Modal cambio password loop | Verificare che `updateUserPassword` aggiorni `must_change_password = false` su Supabase |
 | Badge warning non appare in Gestione Utenti | Verificare che la colonna `must_change_password` esista nella tabella `users` |
+| Un utente è bloccato ("Troppi tentativi falliti") | Si sblocca da solo dopo 15 minuti, oppure un admin preme *Sblocca* sulla sua scheda in Gestione Utenti. Per l'admin di un'area di lavoro: scrivere al supporto FormaTrack, che lo sblocca da `app_admin`. L'`app_admin` non si blocca mai |
+| Il blocco vale solo su un computer e la password non scade mai | Mancano le colonne `failed_login_attempts`, `locked_until`, `password_changed_at` su `users`: eseguire `supabase-login-policy.sql` (poi **Reload schema**) |
+| Banner rosso "Alcune modifiche non sono state accettate" | Il server ha rifiutato modifiche fatte offline (ad esempio la riga era già stata eliminata da qualcun altro): **Riprova** le rimanda, **Scarta** le elimina dal dispositivo |
+| Una modifica fatta offline non parte più | Controllare il banner in alto: se mostra "In attesa di invio" la coda riprova da sola al ritorno della rete e ogni 30 secondi. La coda sta in `localStorage` alla chiave `formatrack.syncQueue` |
 
 ---
 
 ## Prossimi passi consigliati
 
 - [ ] Restringere le policy RLS oltre al semplice `using (true)` e valutare il passaggio a Supabase Auth
-- [ ] Blocco del login dopo N tentativi falliti e scadenza password
-- [ ] Coda di sincronizzazione offline (oggi senza rete l'app è in sola lettura)
-- [ ] Estendere l'audit log ai CRUD su attività, note e valutazioni (oggi copre solo login e gestione utenti)
+- [ ] Spostare la verifica del login (tentativi falliti, blocco, scadenza password) lato server: oggi la applica solo il client
+- [ ] Offline: rendere online-only meno azioni (validazione attività, allegati) e valutare di svuotare/cifrare la coda al logout sui computer condivisi
 - [ ] Attività "precise": trasformare `activity_type` da testo libero a categorie predefinite per area di lavoro
-- [ ] Rimuovere `react-window` da `package.json`: il registro attività usa la paginazione, non la virtualizzazione

@@ -10,6 +10,8 @@ import Alert from '@mui/material/Alert';
 import { getUserById } from './data/users.supabase';
 import { writeAuditLog, AUDIT_EVENTS } from './data/auditLog.supabase';
 import { clearOfflineCache } from './data/offlineCache';
+import { setQueueUser } from './data/offlineQueue';
+import { setAuditActor } from './data/auditLog.supabase';
 import { saveSession, loadSession, clearSession } from './utils/session';
 import { useInactivityTimeout } from './hooks/inactivityTimeout';
 import { logError } from './utils/logger';
@@ -35,6 +37,14 @@ function App() {
     setToast((prev) => ({ ...prev, open: false }));
   };
 
+  // La coda di sincronizzazione e il log di audit devono sapere chi è collegato. La coda resta salvata
+  // sul dispositivo al logout (così un logout per inattività non fa perdere modifiche non ancora inviate).
+  useEffect(() => {
+    const active = isLoggedIn ? currentUser : null;
+    setQueueUser(active?.id ?? null);
+    setAuditActor(active);
+  }, [isLoggedIn, currentUser]);
+
   // Ripristina la sessione all'avvio.
   // Dal localStorage arriva solo l'id: ruolo, permessi e flag mustChangePassword
   // vengono sempre riletti dal database, mai ripresi da quanto salvato in locale.
@@ -56,7 +66,7 @@ function App() {
           return;
         }
         setCurrentUser(freshUser);
-        if (freshUser.mustChangePassword) {
+        if (freshUser.mustChangePassword || freshUser.passwordExpired) {
           setCurrentScreen('forceChangePassword');
         } else {
           setIsLoggedIn(true);
@@ -98,7 +108,7 @@ function App() {
   }, [currentUser]);
 
   const handleLogin = async (user) => {
-    if (user.mustChangePassword) {
+    if (user.mustChangePassword || user.passwordExpired) {
       // Salva l'utente in modo che il modal possa usare user.id,
       // ma NON salvare la sessione e NON andare alla dashboard finché non cambia la password
       setCurrentUser(user);
@@ -112,7 +122,12 @@ function App() {
   };
 
   const handlePasswordChanged = async () => {
-    const userWithoutFlag = { ...currentUser, mustChangePassword: false };
+    const userWithoutFlag = {
+      ...currentUser,
+      mustChangePassword: false,
+      passwordExpired: false,
+      passwordChangedAt: new Date().toISOString(),
+    };
     setCurrentUser(userWithoutFlag);
     setIsLoggedIn(true);
     setCurrentScreen('dashboard');
@@ -188,6 +203,7 @@ function App() {
             <ForceChangePasswordModal
               user={currentUser}
               language={language}
+              reason={currentUser.mustChangePassword ? 'default' : 'expired'}
               onPasswordChanged={handlePasswordChanged}
             />
           )}

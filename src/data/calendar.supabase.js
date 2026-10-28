@@ -1,6 +1,8 @@
 import { supabase } from '../supabaseClient';
 import { readThroughCache } from './offlineCache';
 import { withOptionalColumns } from './schemaFallback';
+import { writeOrQueue, registerExecutor, overlayPending } from './offlineQueue';
+import { SYNC_ENTITY } from '../utils/syncQueue';
 
 /** Cadenze supportate dagli eventi ricorrenti. */
 export const RECURRENCE_OPTIONS = ['none', 'weekly', 'biweekly', 'monthly'];
@@ -23,8 +25,9 @@ const normalizeEvent = (e) => ({
   createdAt: e.created_at,
 });
 
-// Leggi tutti gli eventi di un apprendista
-export const getEventsForStudent = async (studentId) =>
+const byDateAsc = (a, b) => String(a.date).localeCompare(String(b.date));
+
+const fetchEventsForStudent = async (studentId) =>
   readThroughCache(`events:${studentId}`, async () => {
     const { data, error } = await supabase
       .from('calendar_events')
@@ -35,8 +38,13 @@ export const getEventsForStudent = async (studentId) =>
     return data.map(normalizeEvent);
   });
 
-/** Eventi di più apprendisti insieme (ricerca globale multi-apprendista). */
-export const getEventsForStudents = async (studentIds) => {
+// Leggi tutti gli eventi di un apprendista (con le modifiche ancora in coda, se offline)
+export const getEventsForStudent = async (studentId) => {
+  const rows = await fetchEventsForStudent(studentId);
+  return overlayPending(SYNC_ENTITY.EVENT, rows, { studentIds: [studentId], sort: byDateAsc });
+};
+
+const fetchEventsForStudents = async (studentIds) => {
   if (!studentIds || studentIds.length === 0) return [];
   const cacheKey = `events:many:${[...studentIds].sort().join(',')}`;
   return readThroughCache(cacheKey, async () => {
@@ -50,8 +58,14 @@ export const getEventsForStudents = async (studentIds) => {
   });
 };
 
+/** Eventi di più apprendisti insieme (ricerca globale multi-apprendista). */
+export const getEventsForStudents = async (studentIds) => {
+  const rows = await fetchEventsForStudents(studentIds);
+  return overlayPending(SYNC_ENTITY.EVENT, rows, { studentIds, sort: byDateAsc });
+};
+
 // Aggiungi un evento
-export const addEvent = async (studentId, eventData, createdBy = null) => {
+const addEventOnline = async (studentId, eventData, createdBy = null) => {
   const row = {
     student_id: studentId,
     title: eventData.title,
@@ -71,8 +85,30 @@ export const addEvent = async (studentId, eventData, createdBy = null) => {
   });
 };
 
+export const addEvent = async (studentId, eventData, createdBy = null) =>
+  writeOrQueue({
+    entity: SYNC_ENTITY.EVENT,
+    action: 'create',
+    studentId,
+    args: [studentId, eventData, createdBy],
+    row: {
+      studentId,
+      title: eventData.title,
+      description: eventData.description || '',
+      date: eventData.date,
+      startTime: eventData.startTime || null,
+      endTime: eventData.endTime || null,
+      recurrence: eventData.recurrence || 'none',
+      recurrenceEnd: eventData.recurrenceEnd || null,
+      createdBy,
+      createdAt: new Date().toISOString(),
+    },
+    run: () => addEventOnline(studentId, eventData, createdBy),
+  });
+registerExecutor('event:create', (args) => addEventOnline(...args));
+
 // Aggiorna un evento
-export const updateEvent = async (eventId, eventData) => {
+const updateEventOnline = async (eventId, eventData) => {
   const row = {
     title: eventData.title,
     description: eventData.description || null,
@@ -94,9 +130,38 @@ export const updateEvent = async (eventId, eventData) => {
   });
 };
 
+export const updateEvent = async (eventId, eventData) =>
+  writeOrQueue({
+    entity: SYNC_ENTITY.EVENT,
+    action: 'update',
+    targetId: eventId,
+    args: [eventId, eventData],
+    patch: {
+      title: eventData.title,
+      description: eventData.description || '',
+      date: eventData.date,
+      startTime: eventData.startTime || null,
+      endTime: eventData.endTime || null,
+      recurrence: eventData.recurrence || 'none',
+      recurrenceEnd: eventData.recurrenceEnd || null,
+    },
+    run: () => updateEventOnline(eventId, eventData),
+  });
+registerExecutor('event:update', (args) => updateEventOnline(...args));
+
 // Elimina un evento
-export const deleteEvent = async (eventId) => {
+const deleteEventOnline = async (eventId) => {
   const { error } = await supabase.from('calendar_events').delete().eq('id', eventId);
   if (error) throw error;
   return true;
 };
+
+export const deleteEvent = async (eventId) =>
+  writeOrQueue({
+    entity: SYNC_ENTITY.EVENT,
+    action: 'delete',
+    targetId: eventId,
+    args: [eventId],
+    run: () => deleteEventOnline(eventId),
+  });
+registerExecutor('event:delete', (args) => deleteEventOnline(...args));

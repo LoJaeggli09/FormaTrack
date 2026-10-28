@@ -47,6 +47,7 @@ const SettingsSection = ({
   onLanguageChange,
   userRole = 'student',
   isReadOnly = false,
+  isOffline = false,
   currentUser = null,
   onPasswordChange = null,
   selectedStudent = null,
@@ -563,7 +564,7 @@ const SettingsSection = ({
               type="button"
               className="btn-secondary"
               onClick={() => setShowPasswordChange(!showPasswordChange)}
-              disabled={isReadOnly}
+              disabled={isReadOnly || isOffline}
               aria-expanded={showPasswordChange}
             >
               <Lock size={16} />

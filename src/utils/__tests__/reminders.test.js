@@ -220,6 +220,12 @@ describe('buildReminders — app admin e aree di lavoro archiviate', () => {
     expect(reminder.studentId).toBeNull();
   });
 
+  test('con una sola area usa il singolare', () => {
+    const [reminder] = buildReminders({ ...base, workspaces: [{ id: 2, name: 'Vecchia', archived_at: daysAgo(45) }] });
+    expect(reminder.message).toContain('Un\'area archiviata');
+    expect(reminder.message).not.toMatch(/\b1 aree\b/);
+  });
+
   test('non segnala nulla finché nessuna area ha 30 giorni di archivio', () => {
     const reminders = buildReminders({
       ...base,
@@ -242,5 +248,34 @@ describe('buildReminders — app admin e aree di lavoro archiviate', () => {
       const reminders = buildReminders({ ...base, role, workspaces });
       expect(kinds(reminders)).not.toContain(REMINDER_KIND.WORKSPACE_DELETABLE);
     });
+  });
+});
+
+describe('buildReminders — password in scadenza', () => {
+  const DAY = 24 * 60 * 60 * 1000;
+  const changedDaysAgo = (days) => new Date(TODAY.getTime() - days * DAY).toISOString();
+  const forUser = (passwordChangedAt) => buildReminders({
+    role: 'student',
+    currentUser: { id: 1, name: 'Anna', passwordChangedAt },
+    today: TODAY,
+  });
+
+  test('negli ultimi 7 giorni avvisa e rimanda alle Impostazioni', () => {
+    const reminder = forUser(changedDaysAgo(85)).find((item) => item.kind === REMINDER_KIND.PASSWORD_EXPIRING);
+    expect(reminder).toBeDefined();
+    expect(reminder.view).toBe('settings');
+    expect(reminder.severity).toBe('warning');
+  });
+
+  test('prima non avvisa', () => {
+    expect(kinds(forUser(changedDaysAgo(60)))).not.toContain(REMINDER_KIND.PASSWORD_EXPIRING);
+  });
+
+  test('senza data nota non avvisa', () => {
+    expect(kinds(forUser(null))).not.toContain(REMINDER_KIND.PASSWORD_EXPIRING);
+  });
+
+  test("a password già scaduta non c'è più nulla da annunciare: il cambio è obbligatorio all'accesso", () => {
+    expect(kinds(forUser(changedDaysAgo(95)))).not.toContain(REMINDER_KIND.PASSWORD_EXPIRING);
   });
 });

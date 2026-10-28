@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useOnSynced } from '../hooks/useSyncQueue';
+import PendingBadge from './PendingBadge';
 import { Star, Plus, Edit2, Trash2, Save, Award } from 'lucide-react';
 import { translate } from '../i18n';
 import { CardGridSkeleton } from './SkeletonLoader';
@@ -36,6 +38,9 @@ const GradingSection = ({ studentId, language = 'it', isReadOnly = false }) => {
 
     return () => { supabase.removeChannel(channel); };
   }, [studentId]);
+
+  // Dopo un invio dalla coda offline si rilegge l'elenco.
+  useOnSynced(() => { loadStudentGrades(); });
 
   const loadStudentGrades = async () => {
     try {
@@ -235,6 +240,7 @@ const GradingSection = ({ studentId, language = 'it', isReadOnly = false }) => {
                   <strong className="grade-subject">{grade.subject}</strong>
                   <div className="stars">{renderStars(Math.round(grade.grade))}</div>
                   <span className="grade-value">{grade.grade}</span>
+                  <PendingBadge item={grade} t={t} />
                 </div>
                 <span className="row-meta">
                   {new Date(grade.date).toLocaleDateString(locale)}

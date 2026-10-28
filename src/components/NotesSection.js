@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { useOnSynced } from '../hooks/useSyncQueue';
+import PendingBadge from './PendingBadge';
 import { StickyNote, Plus, Edit2, Trash2, Save, X, Lock, Eye, Check } from 'lucide-react';
 import { translate } from '../i18n';
 import {
@@ -14,7 +16,7 @@ import AttachmentsPanel from './AttachmentsPanel';
 /** Classe di categoria: il colore del segnalino è definito da .cat-* in styles/controls.css. */
 const categoryClass = (category) => `cat-${category || 'general'}`;
 
-const NotesSection = ({ studentId, language = 'it', isReadOnly = false, currentUser = null }) => {
+const NotesSection = ({ studentId, language = 'it', isReadOnly = false, isOffline = false, currentUser = null }) => {
   const t = (key) => translate(key, language);
   const locale = language === 'it' ? 'it-IT' : language === 'en' ? 'en-US' : language === 'de' ? 'de-DE' : 'fr-FR';
 
@@ -89,6 +91,9 @@ const NotesSection = ({ studentId, language = 'it', isReadOnly = false, currentU
     return () => { supabase.removeChannel(channel); };
   }, [studentId]);
 
+  // Dopo un invio dalla coda offline si rilegge l'elenco.
+  useOnSynced(() => { loadNotes(); loadAttachmentCounts(); });
+
   const visibleNotes = useMemo(() => {
     const allowed = isStaff ? notes : notes.filter((note) => note.visibility !== NOTE_VISIBILITY.PRIVATE);
     return categoryFilter ? allowed.filter((note) => note.category === categoryFilter) : allowed;
@@ -98,7 +103,7 @@ const NotesSection = ({ studentId, language = 'it', isReadOnly = false, currentU
   // l'informazione che il formatore cerca quando scrive un richiamo.
   useEffect(() => {
     if (!isRecipient || isLoading) return;
-    const unread = notes.filter((note) => !note.readAt && note.visibility !== NOTE_VISIBILITY.PRIVATE);
+    const unread = notes.filter((note) => !note.readAt && !note._pending && note.visibility !== NOTE_VISIBILITY.PRIVATE);
     if (unread.length === 0) return;
 
     Promise.all(unread.map((note) => markNoteRead(note.id, currentUser?.id || null).catch(() => null)))
@@ -333,6 +338,7 @@ const NotesSection = ({ studentId, language = 'it', isReadOnly = false, currentU
                       <span className={`chip chip-cat ${categoryClass(note.category)}`}>
                         {t(`notes.category.${note.category || 'general'}`)}
                       </span>
+                      <PendingBadge item={note} t={t} />
                       {note.visibility === NOTE_VISIBILITY.PRIVATE && (
                         <span className="chip chip-neutral" title={t('notes.visibility.private')}>
                           <Lock size={11} /> {t('notes.visibility.private')}
@@ -367,7 +373,7 @@ const NotesSection = ({ studentId, language = 'it', isReadOnly = false, currentU
                           onChange={loadAttachmentCounts}
                           currentUser={currentUser}
                           language={language}
-                          isReadOnly={isReadOnly}
+                          isReadOnly={isReadOnly || isOffline || Boolean(note._pending)}
                         />
                         {canEdit && (
                           <>

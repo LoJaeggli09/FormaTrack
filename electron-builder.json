@@ -13,6 +13,7 @@
     "build/**/*",
     "main.js",
     "preload.js",
+    "icon/icon.ico",
     "package.json",
     "node_modules/electron-updater/**/*",
     "node_modules/electron-log/**/*",

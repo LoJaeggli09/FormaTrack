@@ -1,12 +1,17 @@
 import React, { useState } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
-import { updateUserPassword } from '../data/users.supabase';
+import { updateUserPassword, verifyUserPassword } from '../data/users.supabase';
+import { PASSWORD_MAX_AGE_DAYS } from '../utils/loginPolicy';
 import { translate } from '../i18n';
 
 const DEFAULT_PASSWORD = 'Abc123!';
 const MIN_LENGTH = 8;
 
-const ForceChangePasswordModal = ({ user, language = 'it', onPasswordChanged }) => {
+/**
+ * @param {{ reason?: 'default'|'expired' }} props
+ *   reason: perché si deve cambiare — password predefinita o password scaduta.
+ */
+const ForceChangePasswordModal = ({ user, language = 'it', reason = 'default', onPasswordChanged }) => {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showNew, setShowNew] = useState(false);
@@ -35,6 +40,11 @@ const ForceChangePasswordModal = ({ user, language = 'it', onPasswordChanged }) 
 
     setLoading(true);
     try {
+      // Una password scaduta non si "rinnova" rimettendo la stessa.
+      if (reason === 'expired' && await verifyUserPassword(user.id, newPassword)) {
+        setError(t('changePassword.errorReuse'));
+        return;
+      }
       await updateUserPassword(user.id, newPassword);
       onPasswordChanged();
     } catch (err) {
@@ -53,7 +63,11 @@ const ForceChangePasswordModal = ({ user, language = 'it', onPasswordChanged }) 
 
         <form onSubmit={handleSubmit}>
           <div className="modal-body">
-            <p>{t('changePassword.message')}</p>
+            <p>
+              {reason === 'expired'
+                ? t('changePassword.messageExpired').replace('{days}', String(PASSWORD_MAX_AGE_DAYS))
+                : t('changePassword.message')}
+            </p>
 
             {error && <div className="login-error">{error}</div>}
 

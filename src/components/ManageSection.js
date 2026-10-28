@@ -1,13 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { UserPlus, Edit2, Trash2, Save, X, KeyRound, Download, AlertTriangle, Archive, RotateCcw } from 'lucide-react';
 import { translate } from '../i18n';
-import { getAllUsers, addUser, updateUser, deleteUser, resetUserPasswordToDefault, archiveUser, restoreUser, getArchivedUsers } from '../data/users.supabase';
+import { getAllUsers, addUser, updateUser, deleteUser, resetUserPasswordToDefault, archiveUser, restoreUser, getArchivedUsers, unlockUser } from '../data/users.supabase';
 import {
   createWorkspaceWithAdmin, getWorkspaces, archiveWorkspace, restoreWorkspace, deleteArchivedWorkspace,
 } from '../data/workspaces.supabase';
 import { ARCHIVE_RETENTION_DAYS, activeWorkspaces, archivedWorkspaces, getArchiveStatus } from '../utils/workspaceArchive';
 import { supabase } from '../supabaseClient';
-import { writeAuditLog, getAuditLog, AUDIT_EVENTS } from '../data/auditLog.supabase';
+import { writeAuditLog, getAuditLog, AUDIT_EVENTS, AUDIT_GROUPS } from '../data/auditLog.supabase';
+import { describeAuditDetails, matchesAuditGroup } from '../utils/auditDescribe';
 import { SectionSkeleton } from './SkeletonLoader';
 import { logError, notifyError, notifySuccess } from '../utils/logger';
 
@@ -32,6 +33,7 @@ const ManageSection = ({ language = 'it', currentUser }) => {
   const [roleFilter, setRoleFilter] = useState('all');
   const [bulkTrainerId, setBulkTrainerId] = useState('');
   const [auditLogEntries, setAuditLogEntries] = useState([]);
+  const [auditFilter, setAuditFilter] = useState('all');
   const [archivedList, setArchivedList] = useState([]);
   const [newUser, setNewUser] = useState({
     name: '',
@@ -385,6 +387,17 @@ const ManageSection = ({ language = 'it', currentUser }) => {
       } else {
         alert(t('manage.resetPasswordError'));
       }
+    }
+  };
+
+  const handleUnlockUser = async (user) => {
+    try {
+      await unlockUser(user.id, currentUser?.id, currentUser?.name, user.name);
+      await loadUsersList();
+      loadAuditLogEntries();
+    } catch (error) {
+      logError('ManageSection', 'Sblocco account fallito', error);
+      notifyError(t('manage.unlockError'));
     }
   };
 
@@ -1142,6 +1155,16 @@ const ManageSection = ({ language = 'it', currentUser }) => {
                   )}
                   {user.apprenticeshipStart && <span className="manage-user-tag">{t('manage.apprenticeshipStart')}: {user.apprenticeshipStart}</span>}
                   {user.apprenticeshipEnd && <span className="manage-user-tag">{t('manage.apprenticeshipEnd')}: {user.apprenticeshipEnd}</span>}
+                  {user.isLocked && (
+                    <>
+                      <span className="chip chip-danger">
+                        {t('manage.userLocked').replace('{time}', new Date(user.lockedUntil).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' }))}
+                      </span>
+                      <button type="button" className="btn-secondary manage-unlock" onClick={() => handleUnlockUser(user)}>
+                        {t('manage.unlockUser')}
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
             )}
@@ -1197,13 +1220,28 @@ const ManageSection = ({ language = 'it', currentUser }) => {
       <div className="card manage-audit-card">
         <div className="manage-audit-header">
           <h3>{t('manage.auditTitle')}</h3>
-          <button className="btn-secondary" onClick={() => { loadAuditLogEntries(); }} title={t('manage.auditRefresh')}>↻</button>
+          <div className="manage-audit-tools">
+            <select
+              value={auditFilter}
+              onChange={(e) => setAuditFilter(e.target.value)}
+              className="manage-inline-select"
+              aria-label={t('manage.tabAudit')}
+            >
+              <option value="all">{t('manage.auditFilterAll')}</option>
+              <option value="access">{t('manage.auditFilterAccess')}</option>
+              <option value="data">{t('manage.auditFilterData')}</option>
+              <option value="management">{t('manage.auditFilterManagement')}</option>
+            </select>
+            <button className="btn-secondary" onClick={() => { loadAuditLogEntries(); }} title={t('manage.auditRefresh')}>↻</button>
+          </div>
         </div>
-        {auditLogEntries.length === 0 ? (
+        {auditLogEntries.filter((entry) => matchesAuditGroup(entry.event, auditFilter, AUDIT_GROUPS)).length === 0 ? (
           <p className="manage-empty">{t('manage.auditEmpty')}</p>
         ) : (
           <div className="manage-audit-list">
-            {auditLogEntries.map((entry) => {
+            {auditLogEntries
+              .filter((entry) => matchesAuditGroup(entry.event, auditFilter, AUDIT_GROUPS))
+              .map((entry) => {
               const when = new Date(entry.created_at).toLocaleString();
               const eventLabels = {
                 login_success:    t('manage.auditLoginSuccess'),
@@ -1219,9 +1257,28 @@ const ManageSection = ({ language = 'it', currentUser }) => {
                 workspace_archived: t('manage.auditWorkspaceArchived'),
                 workspace_restored: t('manage.auditWorkspaceRestored'),
                 workspace_deleted:  t('manage.auditWorkspaceDeleted'),
+                account_locked:   t('manage.auditAccountLocked'),
+                user_unlocked:    t('manage.auditUserUnlocked'),
+                password_expired: t('manage.auditPasswordExpired'),
+                activity_created: t('manage.auditActivityCreated'),
+                activity_updated: t('manage.auditActivityUpdated'),
+                activity_deleted: t('manage.auditActivityDeleted'),
+                activity_status_changed: t('manage.auditActivityStatus'),
+                note_created:     t('manage.auditNoteCreated'),
+                note_updated:     t('manage.auditNoteUpdated'),
+                note_deleted:     t('manage.auditNoteDeleted'),
+                grade_created:    t('manage.auditGradeCreated'),
+                grade_updated:    t('manage.auditGradeUpdated'),
+                grade_deleted:    t('manage.auditGradeDeleted'),
               };
               const eventLabel = eventLabels[entry.event] || entry.event;
-              const target = entry.target_name ? `→ ${entry.target_name}` : '';
+              // I dati degli apprendisti si registrano con l'id dell'apprendista: il nome si ricava dagli utenti noti.
+              const knownUser = entry.target_id
+                ? [...usersList, ...archivedList].find((user) => String(user.id) === String(entry.target_id))
+                : null;
+              const targetName = entry.target_name || knownUser?.name || '';
+              const target = targetName ? `→ ${targetName}` : '';
+              const detailText = describeAuditDetails(entry, t, locale);
 
               return (
                 <div
@@ -1229,6 +1286,7 @@ const ManageSection = ({ language = 'it', currentUser }) => {
                   className="manage-audit-item"
                 >
                   <div className="manage-audit-title">{eventLabel} {target}</div>
+                  {detailText && <div className="manage-audit-sub">{detailText}</div>}
                   <div className="manage-audit-sub">
                     {t('manage.auditBy')}: {entry.actor_name || '-'} | {t('manage.auditWhen')}: {when}
                   </div>
