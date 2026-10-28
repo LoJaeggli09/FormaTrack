@@ -562,6 +562,38 @@ kbd {
   color: var(--ink-3);
 }
 
+/* Stato della coda di sincronizzazione: uno o più avvisi impilati */
+.sync-status {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  margin-bottom: var(--s-5);
+}
+
+.sync-status .offline-banner {
+  margin-bottom: 0;
+}
+
+.offline-banner.is-error {
+  border-left-color: var(--abs);
+}
+
+.offline-banner.is-error svg {
+  color: var(--err);
+}
+
+.offline-banner-actions {
+  display: flex;
+  gap: var(--s-2);
+  margin-top: var(--s-2);
+}
+
+/* Etichetta "in attesa di invio" accanto a una riga creata o modificata offline */
+.pending-badge {
+  margin-left: var(--s-2);
+  vertical-align: middle;
+}
+
 /* ==================== RICERCA GLOBALE ==================== */
 
 .search-overlay {
@@ -2071,6 +2103,17 @@ body.compact-mode .setting-row {
   margin-bottom: var(--s-3);
 }
 
+.manage-section .manage-audit-tools {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.manage-section .manage-audit-tools .manage-inline-select {
+  width: auto;
+  min-width: 200px;
+}
+
 .manage-section .manage-audit-list {
   display: flex;
   flex-direction: column;
@@ -2292,6 +2335,11 @@ body.compact-mode .setting-row {
   white-space: nowrap;
 }
 
+.manage-section .btn-secondary.manage-unlock {
+  height: var(--h-btn-sm);
+  padding: 0 var(--s-3);
+}
+
 .manage-section .manage-warning-icon {
   margin-left: 6px;
   vertical-align: middle;
@@ -2426,21 +2474,9 @@ body.compact-mode .setting-row {
 
 /* ==================== ADATTAMENTO ==================== */
 
-@media (max-width: 1200px) {
-  .dashboard-screen {
-    grid-template-columns: 1fr;
-  }
-
+@media (max-width: 1000px) {
   .side-menu {
-    position: fixed;
-    top: 0;
-    left: -280px;
-    z-index: 1000;
-    height: 100vh;
-  }
-
-  .side-menu.open {
-    left: 0;
+    width: 220px;
   }
 }
 
@@ -2497,20 +2533,12 @@ body.compact-mode .setting-row {
     padding: var(--s-6) var(--s-5);
   }
 
-  .dashboard-screen {
-    flex-direction: column;
-  }
-
   .side-menu {
-    left: -250px;
-    z-index: 50;
-    width: 70vw;
-    max-width: 250px;
+    width: 200px;
   }
 
   .dashboard-content {
     padding: var(--s-5);
-    padding-top: 70px;
   }
 
   .profile-card {
@@ -2570,7 +2598,6 @@ body.compact-mode .setting-row {
 
   .dashboard-content {
     padding: var(--s-4);
-    padding-top: 70px;
   }
 
   .profile-info {

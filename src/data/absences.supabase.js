@@ -1,6 +1,8 @@
 import { supabase } from '../supabaseClient';
 import { readThroughCache } from './offlineCache';
 import { readOptionalTable } from './schemaFallback';
+import { writeOrQueue, registerExecutor, overlayPending } from './offlineQueue';
+import { SYNC_ENTITY } from '../utils/syncQueue';
 
 /** Tipi di assenza gestiti (chiave stabile → chiave i18n `absences.type.<id>`). */
 export const ABSENCE_TYPES = ['sick', 'vacation', 'school', 'inter_company', 'military', 'other'];
@@ -34,8 +36,9 @@ const toRow = (studentId, data, createdBy = null, createdByName = null) => ({
   created_by_name: createdByName,
 });
 
-/** Assenze di un apprendista, dalla più recente. */
-export const getAbsencesForStudent = async (studentId) =>
+const byStartDesc = (a, b) => String(b.startDate).localeCompare(String(a.startDate));
+
+const fetchAbsencesForStudent = async (studentId) =>
   readThroughCache(`absences:${studentId}`, () =>
     readOptionalTable(async () => {
       const { data, error } = await supabase
@@ -47,8 +50,13 @@ export const getAbsencesForStudent = async (studentId) =>
       return data.map(normalizeAbsence);
     }, [], 'absences'));
 
-/** Assenze di più apprendisti insieme (statistiche aggregate). */
-export const getAbsencesForStudents = async (studentIds) => {
+/** Assenze di un apprendista, dalla più recente (con le modifiche ancora in coda, se offline). */
+export const getAbsencesForStudent = async (studentId) => {
+  const rows = await fetchAbsencesForStudent(studentId);
+  return overlayPending(SYNC_ENTITY.ABSENCE, rows, { studentIds: [studentId], sort: byStartDesc });
+};
+
+const fetchAbsencesForStudents = async (studentIds) => {
   if (!studentIds || studentIds.length === 0) return [];
   const cacheKey = `absences:many:${[...studentIds].sort().join(',')}`;
   return readThroughCache(cacheKey, () =>
@@ -62,7 +70,13 @@ export const getAbsencesForStudents = async (studentIds) => {
     }, [], 'absences'));
 };
 
-export const addAbsence = async (studentId, absenceData, createdBy = null, createdByName = null) => {
+/** Assenze di più apprendisti insieme (statistiche aggregate). */
+export const getAbsencesForStudents = async (studentIds) => {
+  const rows = await fetchAbsencesForStudents(studentIds);
+  return overlayPending(SYNC_ENTITY.ABSENCE, rows, { studentIds });
+};
+
+const addAbsenceOnline = async (studentId, absenceData, createdBy = null, createdByName = null) => {
   const { data, error } = await supabase
     .from('absences')
     .insert([toRow(studentId, absenceData, createdBy, createdByName)])
@@ -71,7 +85,34 @@ export const addAbsence = async (studentId, absenceData, createdBy = null, creat
   return normalizeAbsence(data);
 };
 
-export const updateAbsence = async (absenceId, absenceData) => {
+/** Campi dell'assenza come li vede la lista, per mostrarla subito anche se ancora in coda. */
+const absenceFields = (data) => ({
+  startDate: data.startDate,
+  endDate: data.endDate || data.startDate,
+  type: data.type || 'other',
+  halfDay: Boolean(data.halfDay),
+  justified: Boolean(data.justified),
+  reason: data.reason ? String(data.reason).trim() : '',
+});
+
+export const addAbsence = async (studentId, absenceData, createdBy = null, createdByName = null) =>
+  writeOrQueue({
+    entity: SYNC_ENTITY.ABSENCE,
+    action: 'create',
+    studentId,
+    args: [studentId, absenceData, createdBy, createdByName],
+    row: {
+      studentId,
+      ...absenceFields(absenceData),
+      createdBy,
+      createdByName: createdByName || '',
+      createdAt: new Date().toISOString(),
+    },
+    run: () => addAbsenceOnline(studentId, absenceData, createdBy, createdByName),
+  });
+registerExecutor('absence:create', (args) => addAbsenceOnline(...args));
+
+const updateAbsenceOnline = async (absenceId, absenceData) => {
   const row = toRow(absenceData.studentId, absenceData);
   delete row.student_id;
   delete row.created_by;
@@ -85,11 +126,32 @@ export const updateAbsence = async (absenceId, absenceData) => {
   return normalizeAbsence(data);
 };
 
-export const deleteAbsence = async (absenceId) => {
+export const updateAbsence = async (absenceId, absenceData) =>
+  writeOrQueue({
+    entity: SYNC_ENTITY.ABSENCE,
+    action: 'update',
+    targetId: absenceId,
+    args: [absenceId, absenceData],
+    patch: absenceFields(absenceData),
+    run: () => updateAbsenceOnline(absenceId, absenceData),
+  });
+registerExecutor('absence:update', (args) => updateAbsenceOnline(...args));
+
+const deleteAbsenceOnline = async (absenceId) => {
   const { error } = await supabase.from('absences').delete().eq('id', absenceId);
   if (error) throw error;
   return true;
 };
+
+export const deleteAbsence = async (absenceId) =>
+  writeOrQueue({
+    entity: SYNC_ENTITY.ABSENCE,
+    action: 'delete',
+    targetId: absenceId,
+    args: [absenceId],
+    run: () => deleteAbsenceOnline(absenceId),
+  });
+registerExecutor('absence:delete', (args) => deleteAbsenceOnline(...args));
 
 // ── Utility di calcolo ───────────────────────────────────────────────────────
 

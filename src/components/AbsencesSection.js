@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { useOnSynced } from '../hooks/useSyncQueue';
+import PendingBadge from './PendingBadge';
 import { CalendarX, Plus, Edit2, Trash2, Save, X, ShieldCheck, ShieldAlert } from 'lucide-react';
 import { translate } from '../i18n';
 import {
@@ -69,6 +71,9 @@ const AbsencesSection = ({ studentId, language = 'it', isReadOnly = false, curre
 
     return () => { supabase.removeChannel(channel); };
   }, [studentId]);
+
+  // Dopo un invio dalla coda offline si rilegge l'elenco.
+  useOnSynced(() => { loadAbsences(); });
 
   const totals = useMemo(() => {
     const summary = { total: 0, justified: 0, unjustified: 0, byType: {} };
@@ -316,6 +321,7 @@ const AbsencesSection = ({ studentId, language = 'it', isReadOnly = false, curre
                     <span className="chip chip-cat cat-abs">
                       {t(`absences.type.${absence.type}`)}
                     </span>
+                    <PendingBadge item={absence} t={t} />
                   </td>
                   <td>{countAbsenceDays(absence)}</td>
                   <td>{absence.reason}</td>

@@ -2,6 +2,13 @@ import { supabase } from '../supabaseClient';
 import bcrypt from 'bcryptjs';
 import { writeAuditLog, AUDIT_EVENTS } from './auditLog.supabase';
 import { readThroughCache } from './offlineCache';
+import { withOptionalColumns } from './schemaFallback';
+import { localLockedUntil, recordLocalFailure, clearLocalFailures } from './loginAttempts';
+import { registerFailure, isLocked, lockMinutesLeft, isPasswordExpired, LOCK_MINUTES } from '../utils/loginPolicy';
+import { logWarn } from '../utils/logger';
+
+/** Colonne introdotte per il blocco del login e la scadenza della password. */
+const LOGIN_POLICY_COLUMNS = ['failed_login_attempts', 'locked_until', 'password_changed_at'];
 
 const SALT_ROUNDS = 10;
 
@@ -57,6 +64,12 @@ const normalizeUser = (u) => ({
   apprenticeshipEnd: u.data_fine_apprendistato || null,
   archiviato: u.archiviato || false,
   mustChangePassword: u.must_change_password || false,
+  // Blocco dopo troppi tentativi e scadenza della password (colonne facoltative: vedi LOGIN_POLICY_COLUMNS)
+  failedLoginAttempts: u.failed_login_attempts || 0,
+  lockedUntil: u.locked_until || null,
+  isLocked: isLocked(u.locked_until),
+  passwordChangedAt: u.password_changed_at || null,
+  passwordExpired: isPasswordExpired(u.password_changed_at),
   settings: { language: 'it' },
 });
 
@@ -220,11 +233,20 @@ export const getStudentsByTrainer = async (trainerId, workspaceId = null) =>
 // Aggiorna la password di un utente
 export const updateUserPassword = async (userId, newPassword, actorId = null, actorName = null) => {
   const hashed = await hashPassword(newPassword);
-  const { error } = await supabase
-    .from('users')
-    .update({ password_hash: hashed, must_change_password: false })
-    .eq('id', userId);
-  if (error) throw error;
+  await withOptionalColumns(
+    {
+      password_hash: hashed,
+      must_change_password: false,
+      password_changed_at: new Date().toISOString(),
+      failed_login_attempts: 0,
+      locked_until: null,
+    },
+    LOGIN_POLICY_COLUMNS,
+    async (row) => {
+      const { error } = await supabase.from('users').update(row).eq('id', userId);
+      if (error) throw error;
+    }
+  );
   await writeAuditLog({
     event: AUDIT_EVENTS.PASSWORD_CHANGED,
     actorId: actorId || userId,
@@ -238,11 +260,20 @@ export const updateUserPassword = async (userId, newPassword, actorId = null, ac
 // Reimposta la password di un utente alla password predefinita
 export const resetUserPasswordToDefault = async (userId, actorId = null, actorName = null, targetName = null) => {
   const hashed = await hashPassword('Abc123!');
-  const { error } = await supabase
-    .from('users')
-    .update({ password_hash: hashed, must_change_password: true })
-    .eq('id', userId);
-  if (error) throw error;
+  await withOptionalColumns(
+    {
+      password_hash: hashed,
+      must_change_password: true,
+      password_changed_at: new Date().toISOString(),
+      failed_login_attempts: 0,
+      locked_until: null,
+    },
+    LOGIN_POLICY_COLUMNS,
+    async (row) => {
+      const { error } = await supabase.from('users').update(row).eq('id', userId);
+      if (error) throw error;
+    }
+  );
   await writeAuditLog({
     event: AUDIT_EVENTS.PASSWORD_RESET,
     actorId,
@@ -299,6 +330,86 @@ export const getTrainerForStudent = async (studentId) => {
   return normalizeUser(trainer);
 };
 
+/**
+ * Errore per un account bloccato: porta il momento in cui si sblocca e i minuti che mancano.
+ * `contactSupport` è vero per l'admin di un'area di lavoro: sopra di lui c'è solo il supporto FormaTrack.
+ */
+const accountLockedError = (lockedUntil, now, role = null) => {
+  const error = new Error('ACCOUNT_LOCKED');
+  error.code = 'ACCOUNT_LOCKED';
+  error.lockedUntil = lockedUntil;
+  error.minutesLeft = lockMinutesLeft(lockedUntil, now) || LOCK_MINUTES;
+  error.contactSupport = role === 'admin';
+  return error;
+};
+
+/**
+ * Registra una password sbagliata. Il contatore sta sull'account (vale su ogni dispositivo) se il
+ * database ha le colonne, altrimenti sul dispositivo. Un errore nel registrarlo non blocca il login.
+ */
+const recordLoginFailure = async (u, key, now) => {
+  const hasColumns = Object.prototype.hasOwnProperty.call(u, 'failed_login_attempts')
+    && Object.prototype.hasOwnProperty.call(u, 'locked_until');
+  if (!hasColumns) return recordLocalFailure(key, now);
+
+  const next = registerFailure({ failedAttempts: u.failed_login_attempts, lockedUntil: u.locked_until }, now);
+  const { error } = await supabase
+    .from('users')
+    .update({ failed_login_attempts: next.failedAttempts, locked_until: next.lockedUntil })
+    .eq('id', u.id);
+  if (error) {
+    logWarn('Auth', 'Contatore dei tentativi non aggiornato', error);
+    return { ...next, locked: false, justLocked: false };
+  }
+
+  if (next.justLocked) {
+    await writeAuditLog({
+      event: AUDIT_EVENTS.ACCOUNT_LOCKED,
+      actorName: `${u.nome} ${u.cognome}`,
+      targetId: u.id,
+      targetName: `${u.nome} ${u.cognome}`,
+      details: { minutes: LOCK_MINUTES },
+    });
+  }
+  return next;
+};
+
+/** Dopo un accesso riuscito: contatori a zero e, se manca, parte la data dell'ultimo cambio password. */
+const clearLoginFailures = async (u, key, now) => {
+  clearLocalFailures(key);
+
+  const update = {};
+  if ((u.failed_login_attempts || 0) > 0) update.failed_login_attempts = 0;
+  if (u.locked_until) update.locked_until = null;
+  if (Object.prototype.hasOwnProperty.call(u, 'password_changed_at') && !u.password_changed_at) {
+    update.password_changed_at = now.toISOString();
+  }
+  if (Object.keys(update).length === 0) return;
+
+  const { error } = await supabase.from('users').update(update).eq('id', u.id);
+  if (error) logWarn('Auth', 'Contatori di accesso non azzerati', error);
+};
+
+/** Toglie subito il blocco di un account (azione di un admin). */
+export const unlockUser = async (userId, actorId = null, actorName = null, targetName = null) => {
+  await withOptionalColumns(
+    { failed_login_attempts: 0, locked_until: null },
+    LOGIN_POLICY_COLUMNS,
+    async (row) => {
+      const { error } = await supabase.from('users').update(row).eq('id', userId);
+      if (error) throw error;
+    }
+  );
+  await writeAuditLog({
+    event: AUDIT_EVENTS.USER_UNLOCKED,
+    actorId,
+    actorName,
+    targetId: userId,
+    targetName,
+  });
+  return true;
+};
+
 // Autentica un utente (username = nome + cognome oppure email)
 export const authenticateUser = async (username, password) => {
   const { data, error } = await supabase.from('users').select('*');
@@ -312,12 +423,38 @@ export const authenticateUser = async (username, password) => {
     return fullName === normalized || email === normalized;
   });
 
-  if (!u) return null;
+  const now = new Date();
+
+  // Nome sconosciuto: stessa risposta di una password sbagliata (non si rivela chi esiste),
+  // contando i tentativi sul dispositivo.
+  if (!u) {
+    const state = recordLocalFailure(normalized, now);
+    if (state.locked) throw accountLockedError(state.lockedUntil, now);
+    return null;
+  }
+
+  // L'app admin non si blocca mai: se perdesse l'accesso non ci sarebbe nessuno a poterlo ripristinare.
+  const role = normalizeRole(u.ruolo);
+  const canBeLocked = role !== 'app_admin';
+
+  const lockedUntil = !canBeLocked ? null
+    : isLocked(u.locked_until, now) ? u.locked_until : localLockedUntil(normalized, now);
+  if (lockedUntil) throw accountLockedError(lockedUntil, now, role);
 
   const match = await verifyPassword(password, u.password_hash || '');
-  if (!match) return null;
+  if (!match) {
+    if (!canBeLocked) return null;
+    const state = await recordLoginFailure(u, normalized, now);
+    if (state.locked) throw accountLockedError(state.lockedUntil, now, role);
+    return null;
+  }
 
+  await clearLoginFailures(u, normalized, now);
   const normalizedUser = normalizeUser(u);
+  // La scadenza parte dal primo accesso dopo l'introduzione della regola: chi non ha una data la riceve ora.
+  if (Object.prototype.hasOwnProperty.call(u, 'password_changed_at') && !u.password_changed_at) {
+    normalizedUser.passwordChangedAt = now.toISOString();
+  }
 
   // Migrazione trasparente: se la password era in chiaro, la hashiamo e forziamo cambio password
   if (!isBcryptHash(u.password_hash)) {
@@ -329,6 +466,15 @@ export const authenticateUser = async (username, password) => {
   // Forza cambio password se il flag DB è attivo OPPURE (fallback) la password è quella predefinita
   if (normalizedUser.mustChangePassword || password === 'Abc123!') {
     normalizedUser.mustChangePassword = true;
+  }
+  if (normalizedUser.passwordExpired) {
+    await writeAuditLog({
+      event: AUDIT_EVENTS.PASSWORD_EXPIRED,
+      actorId: normalizedUser.id,
+      actorName: normalizedUser.name,
+      targetId: normalizedUser.id,
+      targetName: normalizedUser.name,
+    });
   }
   await writeAuditLog({
     event: AUDIT_EVENTS.LOGIN_SUCCESS,

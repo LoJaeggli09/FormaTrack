@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { useOnSynced } from '../hooks/useSyncQueue';
+import PendingBadge from './PendingBadge';
 import {
   ClipboardList, Plus, Edit2, Trash2, Save, X, FileSpreadsheet, FileText, Copy,
   Search, ArrowUpDown, Send, CheckCircle2, XCircle, RotateCcw, BookmarkPlus, ChevronDown,
@@ -47,6 +49,7 @@ const ActivitiesSection = ({
   student = null,
   language = 'it',
   isReadOnly = false,
+  isOffline = false,
   currentUser = null,
 }) => {
   const t = (key) => translate(key, language);
@@ -132,6 +135,9 @@ const ActivitiesSection = ({
 
     return () => { supabase.removeChannel(channel); };
   }, [studentId]);
+
+  // Dopo un invio dalla coda offline si rilegge l'elenco.
+  useOnSynced(() => { loadActivities(); loadAttachmentCounts(); });
 
   useEffect(() => { setTemplates(getTemplates(currentUser?.id)); }, [currentUser?.id]);
 
@@ -400,6 +406,8 @@ const ActivitiesSection = ({
 
   const renderStatusActions = (activity) => {
     if (activity.date > todayIso()) return null;
+    // Cambiare stato richiede il server: non offline e non su una riga ancora in coda.
+    if (isOffline || activity._pending) return null;
     const status = activity.status || ACTIVITY_STATUS.DRAFT;
 
     if (canValidate) {
@@ -692,7 +700,7 @@ const ActivitiesSection = ({
                         <td><input type="number" min="0" step="5" value={editingActivity.durationMinutes} onChange={(e) => setEditingActivity({ ...editingActivity, durationMinutes: e.target.value })} className="input-sm" /></td>
                         <td><input type="text" value={editingActivity.site} onChange={(e) => setEditingActivity({ ...editingActivity, site: e.target.value })} className="input-sm" /></td>
                         <td><input type="text" value={editingActivity.ticket} onChange={(e) => setEditingActivity({ ...editingActivity, ticket: e.target.value })} className="input-sm" /></td>
-                        <td>{renderStatus(activity)}</td>
+                        <td>{renderStatus(activity)}<PendingBadge item={activity} t={t} /></td>
                         <td className="table-actions">
                           <button type="button" className="success" onClick={() => handleUpdate(activity)} aria-label={t('common.save')}>
                             <Save size={16} />
@@ -719,7 +727,7 @@ const ActivitiesSection = ({
                         <td>{activity.durationMinutes ? `${activity.durationMinutes} min` : ''}</td>
                         <td>{activity.site}</td>
                         <td>{activity.ticket}</td>
-                        <td>{renderStatus(activity)}</td>
+                        <td>{renderStatus(activity)}<PendingBadge item={activity} t={t} /></td>
                         <td className="table-actions">
                           <AttachmentsPanel
                             entityType="activity"
@@ -729,7 +737,7 @@ const ActivitiesSection = ({
                             onChange={loadAttachmentCounts}
                             currentUser={currentUser}
                             language={language}
-                            isReadOnly={isReadOnly}
+                            isReadOnly={isReadOnly || isOffline || Boolean(activity._pending)}
                           />
                           {renderStatusActions(activity)}
                           {canEdit && (

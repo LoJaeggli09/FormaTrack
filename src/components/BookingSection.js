@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { useOnSynced } from '../hooks/useSyncQueue';
+import PendingBadge from './PendingBadge';
 import { CalendarClock, Plus, Edit2, Trash2, Save } from 'lucide-react';
 import { translate } from '../i18n';
 import { getActivitiesForStudent, addActivity, updateActivity, deleteActivity } from '../data/activities.supabase';
@@ -61,6 +63,9 @@ const BookingSection = ({ studentId, language = 'it', canManage = false, current
 
     return () => { supabase.removeChannel(channel); };
   }, [studentId]);
+
+  // Dopo un invio dalla coda offline si rilegge l'elenco.
+  useOnSynced(() => { loadActivities(); });
 
   const upcoming = useMemo(() => {
     const today = todayIso();
@@ -228,6 +233,7 @@ const BookingSection = ({ studentId, language = 'it', canManage = false, current
                   {formatDate(activity.date)}
                   {activity.startTime && <span> · {activity.startTime}</span>}
                   {activity.durationMinutes ? <span> · {activity.durationMinutes} min</span> : null}
+                  <PendingBadge item={activity} t={t} />
                 </div>
                 <div className="row-text">
                   {activity.activityType && <strong>{activity.activityType}</strong>}

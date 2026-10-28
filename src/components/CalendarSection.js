@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { useOnSynced } from '../hooks/useSyncQueue';
+import PendingBadge from './PendingBadge';
 import {
   ChevronLeft, ChevronRight, Plus, Edit2, Trash2, Save, CalendarDays, ClipboardList,
   Repeat, CalendarX, Download, Printer,
@@ -133,6 +135,9 @@ const CalendarSection = ({ studentId, student = null, language = 'it', isReadOnl
       supabase.removeChannel(absencesChannel);
     };
   }, [studentId]);
+
+  // Dopo un invio dalla coda offline si rileggono eventi, attività e assenze.
+  useOnSynced(() => { loadEvents(); loadActivities(); loadAbsences(); });
 
   // ── Griglia (mese o settimana) ──────────────────────────────────────────────
   const calendarCells = useMemo(() => {
@@ -604,6 +609,7 @@ const CalendarSection = ({ studentId, student = null, language = 'it', isReadOnl
                 <div>
                   <div className="calendar-event-title">
                     {event.title}
+                    <PendingBadge item={event} t={t} />
                     {(event.recurrence || 'none') !== 'none' && (
                       <span className="chip chip-neutral" title={t(`calendar.recurrence.${event.recurrence}`)}>
                         <Repeat size={11} /> {t(`calendar.recurrence.${event.recurrence}`)}
@@ -694,6 +700,7 @@ const CalendarSection = ({ studentId, student = null, language = 'it', isReadOnl
                     <div>
                       <div className="calendar-event-title">
                         {activity.activityType || t('activities.title')}
+                        <PendingBadge item={activity} t={t} />
                         {activity.startTime && <span className="calendar-event-time">{activity.startTime}</span>}
                       </div>
                       {activity.description && <p className="calendar-event-description">{activity.description}</p>}

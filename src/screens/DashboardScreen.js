@@ -19,6 +19,7 @@ import ManageSection from '../components/ManageSection';
 import OfflineBanner from '../components/OfflineBanner';
 import GlobalSearch from '../components/GlobalSearch';
 import { useOfflineState } from '../hooks/useOfflineState';
+import { useSyncQueue } from '../hooks/useSyncQueue';
 import { useReminders } from '../hooks/useReminders';
 import { logError } from '../utils/logger';
 
@@ -56,10 +57,12 @@ const DashboardScreen = ({
   const isTrainer = userRole === 'trainer';
   const isAdmin = userRole === 'admin' || userRole === 'app_admin';
   const isInspector = userRole === 'inspector';
-  // Senza rete si lavora sull'ultima copia locale: qualsiasi salvataggio
-  // fallirebbe in silenzio, quindi l'app passa in sola lettura.
+  // Senza rete si lavora sull'ultima copia locale. Le modifiche a attività, note, voti, eventi e
+  // assenze finiscono nella coda di sincronizzazione e partono al ritorno della rete; le azioni che
+  // hanno bisogno del server (validazione, allegati, cambio password) restano disattivate offline.
   const { isOffline, lastSyncAt } = useOfflineState();
-  const isReadOnly = isInspector || isOffline;
+  const sync = useSyncQueue(true);
+  const isReadOnly = isInspector;
   const canSelectStudents = isTrainer || isAdmin || isInspector;
   const t = (key) => translate(key, language);
   const availableStartViews = [
@@ -326,11 +329,22 @@ const DashboardScreen = ({
               onDismissAll={dismissAllReminders}
             />
             <div className="dashboard-logo-fixed">
-              <img src="/logo-formatrack.png" alt="FormaTrack Logo" style={{ height: '60px', width: 'auto' }} />
+              <img src={`${process.env.PUBLIC_URL}/logo-formatrack.png`} alt="FormaTrack Logo" style={{ height: '60px', width: 'auto' }} />
             </div>
           </div>
 
-          {isOffline && <OfflineBanner lastSyncAt={lastSyncAt} language={language} />}
+          {(isOffline || sync.pending > 0 || sync.failed > 0) && (
+            <OfflineBanner
+              isOffline={isOffline}
+              lastSyncAt={lastSyncAt}
+              pending={sync.pending}
+              failed={sync.failed}
+              flushing={sync.flushing}
+              onRetry={sync.retry}
+              onDiscard={sync.discard}
+              language={language}
+            />
+          )}
 
         {canSelectStudents && students.length > 0 && currentView !== 'settings' && currentView !== 'manage' && (
           <div className="student-selector-section">
@@ -388,6 +402,7 @@ const DashboardScreen = ({
               studentId={activeUser.id}
               language={language}
               isReadOnly={isReadOnly}
+              isOffline={isOffline}
               currentUser={currentUser}
             />
           )}
@@ -398,6 +413,7 @@ const DashboardScreen = ({
               student={activeUser}
               language={language}
               isReadOnly={isReadOnly}
+              isOffline={isOffline}
               currentUser={currentUser}
             />
           )}
@@ -445,6 +461,7 @@ const DashboardScreen = ({
               onLanguageChange={onLanguageChange}
               userRole={userRole}
               isReadOnly={isReadOnly}
+              isOffline={isOffline}
               currentUser={currentUser}
               onPasswordChange={handlePasswordChange}
               selectedStudent={selectedStudent}

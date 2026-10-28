@@ -10,6 +10,7 @@
 import { translate } from '../i18n';
 import { ACTIVITY_STATUS } from '../data/activities.supabase';
 import { ARCHIVE_RETENTION_DAYS, deletableWorkspaces } from './workspaceArchive';
+import { passwordDaysLeft, passwordExpiryDate, PASSWORD_WARNING_DAYS } from './loginPolicy';
 
 export const REMINDER_KIND = {
   BOOKING_TODAY: 'bookingToday',
@@ -22,6 +23,7 @@ export const REMINDER_KIND = {
   UNREAD_NOTE: 'unreadNote',
   UNJUSTIFIED_ABSENCE: 'unjustifiedAbsence',
   WORKSPACE_DELETABLE: 'workspaceDeletable',
+  PASSWORD_EXPIRING: 'passwordExpiring',
 };
 
 /** Giorni senza attività registrate oltre i quali si segnala l'apprendista. */
@@ -262,7 +264,7 @@ export const buildReminders = ({
         kind: REMINDER_KIND.WORKSPACE_DELETABLE,
         severity: 'info',
         title: t('reminders.workspaceDeletable.title'),
-        message: fill(t('reminders.workspaceDeletable.message'), {
+        message: fill(t(deletable.length === 1 ? 'reminders.workspaceDeletable.message.one' : 'reminders.workspaceDeletable.message'), {
           count: deletable.length,
           days: ARCHIVE_RETENTION_DAYS,
         }),
@@ -270,6 +272,23 @@ export const buildReminders = ({
         studentId: null,
       });
     }
+  }
+
+  // ── Password in scadenza ─────────────────────────────────────────────────
+  const daysLeft = passwordDaysLeft(currentUser?.passwordChangedAt, today);
+  if (daysLeft !== null && daysLeft > 0 && daysLeft <= PASSWORD_WARNING_DAYS) {
+    const locale = language === 'it' ? 'it-IT' : language === 'en' ? 'en-US' : language === 'de' ? 'de-DE' : 'fr-FR';
+    push({
+      id: `${REMINDER_KIND.PASSWORD_EXPIRING}:${todayIso}`,
+      kind: REMINDER_KIND.PASSWORD_EXPIRING,
+      severity: 'warning',
+      title: t('reminders.passwordExpiring.title'),
+      message: fill(t('reminders.passwordExpiring.message'), {
+        date: passwordExpiryDate(currentUser.passwordChangedAt).toLocaleDateString(locale),
+      }),
+      view: 'settings',
+      studentId: null,
+    });
   }
 
   return reminders.sort(
